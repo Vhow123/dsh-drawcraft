@@ -1,0 +1,57 @@
+{
+  "name": "dsh-prompt-forge",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "提示词工坊：把模糊的生图想法整理成可直接投喂给图像模型的提示词，支持 6 种目标模型方言、18 种视觉风格、字段级拆解与历史记录。",
+  "license": "MIT",
+  "author": "Vhow123",
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "prompt-engineering",
+    "image-generation",
+    "midjourney",
+    "stable-diffusion",
+    "gpt-image"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Vhow123/dsh-prompt-forge.git"
+  },
+  "homepage": "https://github.com/Vhow123/dsh-prompt-forge#readme",
+  "bugs": {
+    "url": "https://github.com/Vhow123/dsh-prompt-forge/issues"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./engine": "./engine.js",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check index.js && node --check client.js && node --check engine.js",
+    "verify": "node test/bare-import.mjs && node test/client-contract.mjs"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "engine.js",
+    "cordis.patch.yml",
+    "README.md",
+    "test/"
+  ]
+}
