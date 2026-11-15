@@ -43,7 +43,7 @@ dsh plugin --profile desktop add github:Vhow123/dsh-prompt-forge
 
 ## 用法
 
-**面板**：侧边栏中部「提示词工坊」→ 顶部选 provider / model（必须选一次，之后记住）→ 写想法 → `Ctrl+Enter`。右栏可直接改、复制、或从历史里翻回上一次。
+**面板**：侧边栏中部「提示词工坊」→ 顶部选 provider / model（必须选一次，之后记住）→ 写想法 → `Ctrl+Enter`。右栏可直接改、复制、或从历史里翻回上一次。描述输入框右上角的「清空」把这段描述一次性清掉，不动你已经选好的方言、风格与画幅。
 
 **Agent 工具**：对话里直接说「帮我写一个 xx 的生图提示词」，模型会调用 `optimize_image_prompt`。它在没有任何面板打开时也能用，配置从 `~/.dsh/prompt-forge.json` 读。
 

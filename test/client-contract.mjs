@@ -76,7 +76,7 @@ const check = (label, ok, detail = '') => {
 };
 
 check('bundle 被注册', Boolean(bundle), bundle ? bundle.id : '未调用 load');
-check('bundle id 正确', bundle?.id === '@local/dsh-prompt-forge', String(bundle?.id));
+check('bundle id 正确', bundle?.id === 'dsh-prompt-forge', String(bundle?.id));
 
 const contract = bundle.factory((specifier) => {
   if (specifier === 'react') return React;
@@ -118,6 +118,12 @@ check('词典无嵌套残留', nested.length === 0, nested.join(','));
 const required = ['meta.title', 'subtitle', 'idea', 'optimize', 'copy', 'historyEmpty'];
 const missing = required.filter((key) => typeof zhFlat[key] !== 'string');
 check('关键文案齐全', missing.length === 0, missing.join(','));
+
+// 清空输入框的按钮：文案要有，且渲染路径确实挂了 dpf-clear 钩子
+check('清空按钮文案', typeof zhFlat.clear === 'string' && zhFlat.clear.length > 0, zhFlat.clear);
+check('清空按钮提示', typeof zhFlat.clearIdeaHint === 'string' && zhFlat.clearIdeaHint.length > 0, zhFlat.clearIdeaHint);
+const clientSource = readFileSync(new URL('../client.js', import.meta.url), 'utf8');
+check('清空按钮已渲染', clientSource.includes('dpf-clear') && clientSource.includes("setIdea(''"), 'dpf-clear');
 
 if (fail.length) {
   console.error(`\n${fail.length} 项未通过：${fail.join('、')}`);

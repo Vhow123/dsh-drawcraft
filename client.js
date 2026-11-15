@@ -9,7 +9,7 @@
  * the panel never talks to a provider directly and never sees a key.
  */
 window.__ModuleLoader__.load({
-  id: '@local/dsh-prompt-forge',
+  id: 'dsh-prompt-forge',
   factory(require) {
     const React = require('react');
     const ReactDOM = require('react-dom');
@@ -120,6 +120,7 @@ window.__ModuleLoader__.load({
       copyField: '复制此字段',
       again: '作为想法再优化',
       clear: '清空',
+      clearIdeaHint: '清空上面这段描述',
       removeHistory: '删除这条',
       clearHistory: '清空历史',
       model: '优化模型',
@@ -183,6 +184,7 @@ window.__ModuleLoader__.load({
       copyField: 'Copy this field',
       again: 'Reuse as idea',
       clear: 'Clear',
+      clearIdeaHint: 'Clear the brief',
       removeHistory: 'Delete this entry',
       clearHistory: 'Clear history',
       model: 'Optimizer model',
@@ -226,6 +228,7 @@ window.__ModuleLoader__.load({
 .dpf-step{font:600 11px/1 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--dsw-alias-text-secondary,#7d7d84);border:1px solid var(--dsw-alias-border-default,#ffffff1c);border-radius:5px;padding:3px 5px}
 .dpf-section-title{font-weight:600;font-size:12.5px;letter-spacing:.02em;color:var(--dsw-alias-text-primary,#dededf)}
 .dpf-section-note{margin-left:auto;font-size:11px;color:var(--dsw-alias-text-secondary,#7d7d84);font-variant-numeric:tabular-nums}
+.dpf-section-head .dpf-clear{padding:3px 8px;font-size:11px;border-radius:6px}
 .dpf-textarea,.dpf-input,.dpf-select{width:100%;color:inherit;background:var(--dsw-alias-bg-input,#ffffff07);border:1px solid var(--dsw-alias-border-default,#ffffff18);border-radius:8px;padding:9px 11px;font:inherit;outline:none;transition:border-color .12s}
 .dpf-textarea:focus,.dpf-input:focus,.dpf-select:focus{border-color:var(--dsw-alias-border-focused,#8d8d95)}
 .dpf-textarea{resize:vertical;min-height:132px;line-height:1.6}
@@ -443,6 +446,7 @@ window.__ModuleLoader__.load({
 
           const mounted = useRef(true);
           const runIdRef = useRef('');
+          const ideaRef = useRef(null);
           useEffect(() => {
             mounted.current = true;
             return () => {
@@ -732,9 +736,25 @@ window.__ModuleLoader__.load({
                       h('span', { className: 'dpf-step' }, '01'),
                       h('span', { className: 'dpf-section-title' }, t('idea')),
                       h('span', { className: 'dpf-section-note' }, `${idea.length} ${t('ideaCount')}`),
+                      idea.length > 0 &&
+                        h(
+                          'button',
+                          {
+                            className: 'dpf-btn dpf-btn-ghost dpf-btn-small dpf-clear',
+                            type: 'button',
+                            title: t('clearIdeaHint'),
+                            onClick: () => {
+                              setIdea('');
+                              setError('');
+                              ideaRef.current?.focus?.();
+                            },
+                          },
+                          t('clear'),
+                        ),
                     ),
                     h('textarea', {
                       className: 'dpf-textarea dpf-idea',
+                      ref: ideaRef,
                       value: idea,
                       maxLength: 6000,
                       placeholder: t('ideaPlaceholder'),
