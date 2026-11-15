@@ -76,7 +76,7 @@ const check = (label, ok, detail = '') => {
 };
 
 check('bundle 被注册', Boolean(bundle), bundle ? bundle.id : '未调用 load');
-check('bundle id 正确', bundle?.id === 'dsh-prompt-forge', String(bundle?.id));
+check('bundle id 正确', bundle?.id === 'dsh-image-prompt-forge', String(bundle?.id));
 
 const contract = bundle.factory((specifier) => {
   if (specifier === 'react') return React;
@@ -94,23 +94,23 @@ check('不再注册 footer.action', !injections.includes('sidebar.footer.action'
 
 const panelEntry = registrations.find((item) => item.options?.name === 'sidebar.panellist');
 check('panellist 条目存在', Boolean(panelEntry), panelEntry ? String(panelEntry.options.id) : '缺失');
-check('panellist id 用命名空间', panelEntry?.options?.id === 'dsh-prompt-forge', String(panelEntry?.options?.id));
+check('panellist id 用命名空间', panelEntry?.options?.id === 'dsh-image-prompt-forge', String(panelEntry?.options?.id));
 check('panellist 有 order', typeof panelEntry?.options?.order === 'number', String(panelEntry?.options?.order));
 check('panellist label 是函数', typeof panelEntry?.options?.label === 'function', typeof panelEntry?.options?.label);
 
 const label = panelEntry?.options?.label?.();
-check('label 命中词典键名', label === 'dsh-prompt-forge:meta.title', String(label));
+check('label 命中词典键名', label === 'dsh-image-prompt-forge:meta.title', String(label));
 
 const glyph = panelEntry?.component?.({ size: 18, active: false });
 check('glyph 是 svg', glyph?.type === 'svg', String(glyph?.type));
-check('glyph 带皮肤钩子', glyph?.props?.['data-dsh-panel-entry'] === 'dsh-prompt-forge', String(glyph?.props?.['data-dsh-panel-entry']));
+check('glyph 带皮肤钩子', glyph?.props?.['data-dsh-panel-entry'] === 'dsh-image-prompt-forge', String(glyph?.props?.['data-dsh-panel-entry']));
 check('glyph 跟着外壳尺寸', glyph?.props?.width === 18 && glyph?.props?.height === 18, String(glyph?.props?.width));
 
 const mainPage = registrations.find((item) => item.options?.name === 'main');
-check('main 页存在且键匹配', mainPage?.options?.key === 'dsh-prompt-forge', String(mainPage?.options?.key));
+check('main 页存在且键匹配', mainPage?.options?.key === 'dsh-image-prompt-forge', String(mainPage?.options?.key));
 
-const zhFlat = dictionaries.find((item) => item.namespace === 'dsh-prompt-forge')?.dict?.zh ?? {};
-const enFlat = dictionaries.find((item) => item.namespace === 'dsh-prompt-forge')?.dict?.en ?? {};
+const zhFlat = dictionaries.find((item) => item.namespace === 'dsh-image-prompt-forge')?.dict?.zh ?? {};
+const enFlat = dictionaries.find((item) => item.namespace === 'dsh-image-prompt-forge')?.dict?.en ?? {};
 check('中文词典已拍平', typeof zhFlat['meta.title'] === 'string' && zhFlat['meta.title'].length > 0, zhFlat['meta.title']);
 check('英文词典已拍平', typeof enFlat['meta.title'] === 'string' && enFlat['meta.title'].length > 0, enFlat['meta.title']);
 const nested = Object.entries(zhFlat).filter(([, value]) => value && typeof value === 'object').map(([key]) => key);

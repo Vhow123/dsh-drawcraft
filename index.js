@@ -1,5 +1,5 @@
 /**
- * dsh-prompt-forge host half.
+ * dsh-image-prompt-forge host half.
  *
  * Registers three loopback-only JSON routes for the browser panel and one agent
  * tool, all of them delegating the actual prompt work to engine.js:

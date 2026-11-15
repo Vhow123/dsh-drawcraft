@@ -1,4 +1,4 @@
-# 提示词工坊 · dsh-prompt-forge
+# 提示词工坊 · dsh-image-prompt-forge
 
 把一句模糊的生图想法，整理成可直接投喂给图像模型的提示词。插件在 DSH 侧边栏中部的面板区（与「插件」「技能中心」同组）加一个入口，面板里选好目标模型方言、风格、画幅，写一句人话，剩下的交给对话模型——它输出结构化的画面拆解，插件负责拼装成目标模型真正认的语法。
 
@@ -50,7 +50,7 @@ dsh plugin --profile desktop add github:Vhow123/dsh-prompt-forge
 ## 配置
 
 - `~/.dsh/prompt-forge.json`：provider / model / 方言 / 风格 / 语言 / 画幅 / 候选数，`/optimize` 带 `remember: true` 时写入。
-- 浏览器 localStorage `dsh-prompt-forge:v1`：面板上的选择与最近 24 条历史。
+- 浏览器 localStorage `dsh-image-prompt-forge:v1`：面板上的选择与最近 24 条历史。
 
 ## 接口
 

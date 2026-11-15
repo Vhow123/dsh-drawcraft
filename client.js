@@ -1,5 +1,5 @@
 /**
- * dsh-prompt-forge browser half.
+ * dsh-image-prompt-forge browser half.
  *
  * A single sidebar-footer launcher that opens a two-column workspace:
  * left = the brief (idea, dialect, style, framing, advanced constraints),
@@ -9,14 +9,14 @@
  * the panel never talks to a provider directly and never sees a key.
  */
 window.__ModuleLoader__.load({
-  id: 'dsh-prompt-forge',
+  id: 'dsh-image-prompt-forge',
   factory(require) {
     const React = require('react');
     const ReactDOM = require('react-dom');
 
-    const NS = 'dsh-prompt-forge';
+    const NS = 'dsh-image-prompt-forge';
     const API = '/api/prompt-forge';
-    const STORE_KEY = 'dsh-prompt-forge:v1';
+    const STORE_KEY = 'dsh-image-prompt-forge:v1';
     const HISTORY_LIMIT = 24;
 
     // Labels are duplicated from engine.js on purpose: client.js is loaded as a
@@ -301,7 +301,7 @@ window.__ModuleLoader__.load({
       apply(ctx) {
         ctx.effect(
           () => ctx.locale.register(NS, { zh: flattenDict(zh), en: flattenDict(en) }),
-          'dsh-prompt-forge: dictionaries',
+          'dsh-image-prompt-forge: dictionaries',
         );
 
         const { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } = React;
