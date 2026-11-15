@@ -1,6 +1,6 @@
 {
   "name": "dsh-prompt-forge",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "description": "提示词工坊：把模糊的生图想法整理成可直接投喂给图像模型的提示词，支持 6 种目标模型方言、18 种视觉风格、字段级拆解与历史记录。",
   "license": "MIT",
