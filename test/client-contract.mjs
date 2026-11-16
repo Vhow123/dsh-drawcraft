@@ -133,6 +133,7 @@ check('拖放区已渲染', clientSource.includes('dpf-drop') && clientSource.in
 check('改一句入口已渲染', clientSource.includes('dpf-patch') && clientSource.includes('applyPatch'), 'dpf-patch');
 check('试一张走本机 imagegen 代理', clientSource.includes("'/api/dsh-imagegen/generate'"), 'GENERATE_API');
 check('预览图已渲染', clientSource.includes('dpf-preview') && clientSource.includes('shot.b64'), 'dpf-preview');
+check('404 解释为宿主过期', clientSource.includes("HOST_STALE") && typeof zhFlat.hostStale === 'string', zhFlat.hostStale);
 check('三方向路由齐全', ['describe', 'patch', 'optimize'].every((name) => clientSource.includes(`post('${name}'`)), 'post()');
 
 if (fail.length) {

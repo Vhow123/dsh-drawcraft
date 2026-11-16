@@ -16,6 +16,7 @@ window.__ModuleLoader__.load({
 
     const NS = 'dsh-image-prompt-forge';
     const API = '/api/prompt-forge';
+    const HOST_STALE = 'HOST_STALE';
     // 本机 dsh-imagegen 插件暴露的生图代理接口；没装时返回 404，面板会给出提示。
     const GENERATE_API = '/api/dsh-imagegen/generate';
     const IMAGE_MAX_EDGE = 1280;
@@ -162,6 +163,7 @@ window.__ModuleLoader__.load({
       generating: '出图中…',
       previewTitle: '预览图',
       noImagegen: '没找到本机的生图插件（dsh-imagegen），装好后这里就能直接出图',
+      hostStale: '宿主还在跑旧版本的插件，退出桌面端重新打开一次就能用了',
       previewFailed: '出图失败',
       regenerate: '再出一张',
     };
@@ -249,6 +251,7 @@ window.__ModuleLoader__.load({
       generating: 'Rendering…',
       previewTitle: 'Preview',
       noImagegen: 'No local image plugin (dsh-imagegen) found; install it to render from here',
+      hostStale: 'The host is still running the previous build of this plugin — quit and reopen the desktop app once.',
       previewFailed: 'Render failed',
       regenerate: 'Render another',
     };
@@ -394,6 +397,9 @@ window.__ModuleLoader__.load({
             body: JSON.stringify(body ?? {}),
             signal,
           });
+          // The panel bundle can update on a page refresh while the host half still
+          // runs the previous build; a 404 here almost always means exactly that.
+          if (response.status === 404) throw new Error(HOST_STALE);
           let payload;
           try {
             payload = await response.json();
@@ -504,6 +510,11 @@ window.__ModuleLoader__.load({
             () => ctx.locale.getSnapshot().revision,
           );
           const t = ctx.locale.bind(NS);
+          // 404 只可能意味着宿主还是旧构建：面板能随刷新更新，宿主半要重启进程。
+          const explain = (failure) => {
+            const message = failure?.message || String(failure);
+            return message === HOST_STALE ? t('hostStale') : message;
+          };
           const panelRef = useRef(null);
 
           const stored = useMemo(readStore, []);
@@ -686,7 +697,7 @@ window.__ModuleLoader__.load({
               });
             } catch (failure) {
               if (!mounted.current || runIdRef.current !== runId) return;
-              setError(failure.message || String(failure));
+              setError(explain(failure));
             } finally {
               if (mounted.current && runIdRef.current === runId) {
                 setRunning(false);
@@ -783,7 +794,7 @@ window.__ModuleLoader__.load({
                 setNotice(t('describeDone'));
               } catch (failure) {
                 if (!mounted.current || runIdRef.current !== runId) return;
-                setError(failure.message || String(failure));
+                setError(explain(failure));
               } finally {
                 if (mounted.current && runIdRef.current === runId) {
                   setDescribing(false);
@@ -838,7 +849,7 @@ window.__ModuleLoader__.load({
               remember(payload);
             } catch (failure) {
               if (!mounted.current || runIdRef.current !== runId) return;
-              setError(failure.message || String(failure));
+              setError(explain(failure));
             } finally {
               if (mounted.current && runIdRef.current === runId) {
                 setPatching(false);
