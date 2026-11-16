@@ -110,3 +110,7 @@ cordis.patch.yml    bundle 补丁：把自己 insert 进插件树
 test/               引擎单测 + 路由契约 + 裸加载验证 + 浏览器半契约
 ```
 预览图支持点击看大图：滚轮以指针为中心缩放（20%–800%）、按住拖动平移、双击在 100% 与 200% 之间切换，底部有 −／倍率／+ 与保存。
+
+## 更新日志
+
+见 [CHANGELOG.md](CHANGELOG.md)，或 GitHub Releases 页面。
