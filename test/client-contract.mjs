@@ -139,15 +139,23 @@ check('出图请求带渠道与模型', clientSource.includes('channelId: active
 check('三方向路由齐全', ['describe', 'patch', 'optimize'].every((name) => clientSource.includes(`post('${name}'`)), 'post()');
 
 // 预览图：点开放大、保存到本地
-for (const key of ['zoomHint', 'save', 'imageSize', 'imageQuality', 'sizeAuto', 'qualityAuto']) {
+for (const key of ['zoomHint', 'zoomWheel', 'zoomIn', 'zoomOut', 'zoomReset', 'save', 'imageSize', 'imageQuality', 'sizeAuto', 'qualityAuto']) {
   check(`新文案 ${key}`, typeof zhFlat[key] === 'string' && zhFlat[key].length > 0, String(zhFlat[key]));
 }
-check('预览图可点开放大', clientSource.includes('dpf-lightbox') && clientSource.includes('setLightbox(shot)'), 'dpf-lightbox');
+check('预览图可点开放大', clientSource.includes('dpf-lightbox') && clientSource.includes('openLightbox(shot)'), 'dpf-lightbox');
 check('预览图可保存', clientSource.includes('dpf-shot-save') && clientSource.includes('link.download'), 'dpf-shot-save');
 check('Esc 先收大图再关面板', clientSource.includes('if (lightbox) {'), 'lightbox');
 check('出图尺寸可调', clientSource.includes("const IMAGE_SIZES = ['auto', '1:1'") && clientSource.includes('pickImageSize'), 'IMAGE_SIZES');
 check('出图清晰度可调', clientSource.includes("const IMAGE_QUALITIES = ['auto', '1k', '2k', '4k']") && clientSource.includes('pickImageQuality'), 'IMAGE_QUALITIES');
 check('尺寸与清晰度带进出图请求', clientSource.includes('quality: imageQuality') && clientSource.includes("imageSize !== 'auto'"), 'size/quality');
+// 大图滚轮缩放：非 passive 原生监听 + 以指针为中心 + 拖拽平移
+check('滚轮缩放用非 passive 监听', clientSource.includes("addEventListener('wheel', onWheel, { passive: false })") && clientSource.includes('event.preventDefault()'), 'wheel');
+check('缩放范围有上下限', clientSource.includes('const MIN_ZOOM = 0.2') && clientSource.includes('const MAX_ZOOM = 8'), 'MIN_ZOOM/MAX_ZOOM');
+check('以指针为中心缩放', clientSource.includes('const ratio = scale / prev.scale') && clientSource.includes('cx - (cx - prev.x) * ratio'), 'ratio');
+check('拖动平移', clientSource.includes('onPointerDown: startDrag') && clientSource.includes('onPointerMove: moveDrag') && clientSource.includes('moveDrag') && clientSource.includes('setPointerCapture'), 'drag');
+check('双击复位', clientSource.includes('onDoubleClick') && clientSource.includes('prev.scale === 1 ? { scale: 2'), 'dblclick');
+check('倍率条与缩放按钮', clientSource.includes('dpf-zoom-level') && clientSource.includes("Math.round(zoom.scale * 100)") && clientSource.includes('zoomBy(1.25)'), 'zoom-level');
+check('大图提示文案', clientSource.includes("className: 'dpf-lightbox-hint'"), 'hint');
 
 if (fail.length) {
   console.error(`\n${fail.length} 项未通过：${fail.join('、')}`);

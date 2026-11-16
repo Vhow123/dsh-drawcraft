@@ -26,10 +26,13 @@ window.__ModuleLoader__.load({
     // 出图尺寸用比例字符串（dsh-imagegen 会按协议换算成像素），清晰度用 1k/2k/4k。
     const IMAGE_SIZES = ['auto', '1:1', '3:4', '4:3', '9:16', '2:3', '3:2', '16:9', '21:9'];
     const IMAGE_QUALITIES = ['auto', '1k', '2k', '4k'];
+    // 大图缩放范围与步长。
+    const MIN_ZOOM = 0.2;
+    const MAX_ZOOM = 8;
     const STORE_KEY = 'dsh-image-prompt-forge:v1';
     const HISTORY_LIMIT = 24;
     // 页脚显示，用来一眼判断浏览器加载的是哪一版 bundle（缓存排查用）。
-    const BUILD = '1.1.3';
+    const BUILD = '1.1.4';
 
     // Labels are duplicated from engine.js on purpose: client.js is loaded as a
     // separate bundle and cannot import ESM. The host catalog (fetched on open)
@@ -180,6 +183,10 @@ window.__ModuleLoader__.load({
       sizeAuto: '跟随画幅',
       qualityAuto: '渠道默认',
       zoomHint: '点击放大',
+      zoomWheel: '滚轮缩放 · 拖动平移 · 双击复位',
+      zoomIn: '放大',
+      zoomOut: '缩小',
+      zoomReset: '复位到 100%',
       save: '保存',
       previewFailed: '出图失败',
       regenerate: '再出一张',
@@ -277,6 +284,10 @@ window.__ModuleLoader__.load({
       sizeAuto: 'Follow aspect',
       qualityAuto: 'Channel default',
       zoomHint: 'Click to enlarge',
+      zoomWheel: 'Scroll to zoom · drag to pan · double-click to reset',
+      zoomIn: 'Zoom in',
+      zoomOut: 'Zoom out',
+      zoomReset: 'Reset to 100%',
       save: 'Save',
       previewFailed: 'Render failed',
       regenerate: 'Render another',
@@ -379,7 +390,11 @@ window.__ModuleLoader__.load({
 .dpf-shot-save{position:absolute;top:8px;right:8px;padding:4px 10px;border-radius:999px;border:1px solid #ffffff2b;background:#000000b3;color:#fff;font-size:11px;line-height:1.6;cursor:pointer;opacity:0;transition:opacity .15s}
 .dpf-shot:hover .dpf-shot-save,.dpf-shot-save:focus-visible{opacity:1}
 .dpf-lightbox{position:fixed;inset:0;z-index:10100;background:#000000e6;display:flex;align-items:center;justify-content:center;padding:40px 40px 72px;cursor:zoom-out}
-.dpf-lightbox img{max-width:100%;max-height:100%;object-fit:contain;border-radius:10px;box-shadow:0 30px 90px #000c}
+.dpf-lightbox img{max-width:100%;max-height:100%;object-fit:contain;border-radius:10px;box-shadow:0 30px 90px #000c;cursor:grab;transition:transform .09s linear;will-change:transform;user-select:none;touch-action:none}
+.dpf-lightbox img[data-zoomed="0"]{cursor:zoom-in}
+.dpf-lightbox img:active{cursor:grabbing}
+.dpf-lightbox-hint{position:absolute;top:18px;left:0;right:0;text-align:center;font-size:11.5px;color:#ffffff8a;pointer-events:none}
+.dpf-zoom-level{min-width:64px;justify-content:center;font-variant-numeric:tabular-nums}
 .dpf-lightbox-bar{position:absolute;bottom:22px;left:0;right:0;display:flex;justify-content:center;gap:10px;cursor:default}
 .dpf-lightbox-bar .dpf-btn{background:#ffffff1a;border-color:#ffffff33;color:#fff}
 .dpf-lightbox-bar .dpf-btn:hover{background:#ffffff2b}
@@ -595,6 +610,10 @@ window.__ModuleLoader__.load({
           const [imageSize, setImageSize] = useState(stored.imageSize || 'auto');
           const [imageQuality, setImageQuality] = useState(stored.imageQuality || 'auto');
           const [lightbox, setLightbox] = useState(null);
+          // 大图的缩放状态：滚轮以指针为中心缩放，按住拖动平移，双击复位。
+          const [zoom, setZoom] = useState({ scale: 1, x: 0, y: 0 });
+          const lightboxRef = useRef(null);
+          const dragRef = useRef(null);
           // 出图渠道/模型：来自本机 dsh-imagegen 的设置视图，没装插件时整块不显示。
           const [imageChannels, setImageChannels] = useState([]);
           const [imageChannelId, setImageChannelId] = useState(typeof stored.imageChannelId === 'string' ? stored.imageChannelId : '');
@@ -612,6 +631,44 @@ window.__ModuleLoader__.load({
               mounted.current = false;
             };
           }, []);
+
+          // 大图的打开/关闭/缩放：lightbox 存图片对象，zoom 存 transform 三件。
+          const openLightbox = (shot) => {
+            setZoom({ scale: 1, x: 0, y: 0 });
+            setLightbox(shot);
+          };
+          const closeLightbox = () => {
+            setLightbox(null);
+            setZoom({ scale: 1, x: 0, y: 0 });
+          };
+          const zoomBy = (factor) => {
+            setZoom((prev) => {
+              const scale = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prev.scale * factor));
+              if (scale === prev.scale) return prev;
+              const ratio = scale / prev.scale;
+              return { scale, x: prev.x * ratio, y: prev.y * ratio };
+            });
+          };
+          const startDrag = (event) => {
+            if (event.button !== 0) return;
+            dragRef.current = { px: event.clientX, py: event.clientY, x: zoom.x, y: zoom.y, moved: false };
+            event.currentTarget.setPointerCapture?.(event.pointerId);
+          };
+          const moveDrag = (event) => {
+            const drag = dragRef.current;
+            if (!drag) return;
+            const dx = event.clientX - drag.px;
+            const dy = event.clientY - drag.py;
+            if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+            setZoom((prev) => ({ scale: prev.scale, x: drag.x + dx, y: drag.y + dy }));
+          };
+          const endDrag = (event) => {
+            const drag = dragRef.current;
+            dragRef.current = null;
+            event.currentTarget.releasePointerCapture?.(event.pointerId);
+            // 没拖动就是一次点击，点图即关闭。
+            if (drag && !drag.moved) closeLightbox();
+          };
 
           // 嵌入主区时的关闭路径：layout.selectPanel(null) 把中央面板切回会话
           // （dsh-client-ui-layout/lib/client.js:468，传 null 即回到 Conversation）。
@@ -634,7 +691,7 @@ window.__ModuleLoader__.load({
                 event.stopPropagation();
                 // 大图开着就先收大图，再按一次才关面板。
                 if (lightbox) {
-                  setLightbox(null);
+                  closeLightbox();
                   return;
                 }
                 closePanel();
@@ -643,6 +700,28 @@ window.__ModuleLoader__.load({
             window.addEventListener('keydown', onKey, true);
             return () => window.removeEventListener('keydown', onKey, true);
           }, [onClose, lightbox]);
+
+          // 滚轮缩放必须用非 passive 的原生监听，React 的 onWheel 无法 preventDefault。
+          useEffect(() => {
+            const node = lightboxRef.current;
+            if (!lightbox || !node) return undefined;
+            const onWheel = (event) => {
+              event.preventDefault();
+              const rect = node.getBoundingClientRect();
+              const cx = event.clientX - rect.left - rect.width / 2;
+              const cy = event.clientY - rect.top - rect.height / 2;
+              setZoom((prev) => {
+                const factor = event.deltaY < 0 ? 1.14 : 1 / 1.14;
+                const scale = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prev.scale * factor));
+                if (scale === prev.scale) return prev;
+                // 让指针下的那一点在缩放前后保持不动。
+                const ratio = scale / prev.scale;
+                return { scale, x: cx - (cx - prev.x) * ratio, y: cy - (cy - prev.y) * ratio };
+              });
+            };
+            node.addEventListener('wheel', onWheel, { passive: false });
+            return () => node.removeEventListener('wheel', onWheel);
+          }, [lightbox]);
 
           useEffect(() => {
             panelRef.current?.focus?.();
@@ -1585,7 +1664,7 @@ window.__ModuleLoader__.load({
                                 src: `data:${shot.mime};base64,${shot.b64}`,
                                 alt: '',
                                 title: t('zoomHint'),
-                                onClick: () => setLightbox(shot),
+                                onClick: () => openLightbox(shot),
                               }),
                               h(
                                 'button',
@@ -1722,19 +1801,35 @@ window.__ModuleLoader__.load({
                 'div',
                 {
                   className: 'dpf-lightbox',
+                  ref: lightboxRef,
                   role: 'dialog',
                   'aria-modal': 'true',
                   'aria-label': t('zoomHint'),
                   onMouseDown: (event) => {
-                    if (event.target === event.currentTarget) setLightbox(null);
+                    if (event.target === event.currentTarget) closeLightbox();
                   },
                 },
-                h('img', { src: `data:${lightbox.mime};base64,${lightbox.b64}`, alt: '', onClick: () => setLightbox(null) }),
+                h('img', {
+                  src: `data:${lightbox.mime};base64,${lightbox.b64}`,
+                  alt: '',
+                  'data-zoomed': zoom.scale > 1 ? '1' : '0',
+                  draggable: false,
+                  style: { transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})` },
+                  onPointerDown: startDrag,
+                  onPointerMove: moveDrag,
+                  onPointerUp: endDrag,
+                  onPointerCancel: endDrag,
+                  onDoubleClick: () => setZoom((prev) => (prev.scale === 1 ? { scale: 2, x: 0, y: 0 } : { scale: 1, x: 0, y: 0 })),
+                }),
+                h('div', { className: 'dpf-lightbox-hint' }, t('zoomWheel')),
                 h(
                   'div',
                   { className: 'dpf-lightbox-bar' },
+                  h('button', { className: 'dpf-btn dpf-btn-ghost dpf-btn-small', type: 'button', 'aria-label': t('zoomOut'), onClick: () => zoomBy(1 / 1.25) }, '−'),
+                  h('button', { className: 'dpf-btn dpf-btn-ghost dpf-btn-small dpf-zoom-level', type: 'button', title: t('zoomReset'), onClick: () => setZoom({ scale: 1, x: 0, y: 0 }) }, `${Math.round(zoom.scale * 100)}%`),
+                  h('button', { className: 'dpf-btn dpf-btn-ghost dpf-btn-small', type: 'button', 'aria-label': t('zoomIn'), onClick: () => zoomBy(1.25) }, '+'),
                   h('button', { className: 'dpf-btn dpf-btn-ghost dpf-btn-small', type: 'button', onClick: () => saveShot(lightbox, 0) }, t('save')),
-                  h('button', { className: 'dpf-btn dpf-btn-ghost dpf-btn-small', type: 'button', onClick: () => setLightbox(null) }, t('close')),
+                  h('button', { className: 'dpf-btn dpf-btn-ghost dpf-btn-small', type: 'button', onClick: closeLightbox }, t('close')),
                 ),
               ),
           );
