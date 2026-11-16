@@ -125,6 +125,16 @@ check('清空按钮提示', typeof zhFlat.clearIdeaHint === 'string' && zhFlat.c
 const clientSource = readFileSync(new URL('../client.js', import.meta.url), 'utf8');
 check('清空按钮已渲染', clientSource.includes('dpf-clear') && clientSource.includes("setIdea(''"), 'dpf-clear');
 
+// 三件新能力：图片拖放、改一句、试一张
+for (const key of ['dropImage', 'describeHint', 'patchPlaceholder', 'patchHint', 'previewHint', 'noImagegen']) {
+  check(`新文案 ${key}`, typeof zhFlat[key] === 'string' && zhFlat[key].length > 0, String(zhFlat[key]));
+}
+check('拖放区已渲染', clientSource.includes('dpf-drop') && clientSource.includes('onDrop: onDropImage'), 'dpf-drop');
+check('改一句入口已渲染', clientSource.includes('dpf-patch') && clientSource.includes('applyPatch'), 'dpf-patch');
+check('试一张走本机 imagegen 代理', clientSource.includes("'/api/dsh-imagegen/generate'"), 'GENERATE_API');
+check('预览图已渲染', clientSource.includes('dpf-preview') && clientSource.includes('shot.b64'), 'dpf-preview');
+check('三方向路由齐全', ['describe', 'patch', 'optimize'].every((name) => clientSource.includes(`post('${name}'`)), 'post()');
+
 if (fail.length) {
   console.error(`\n${fail.length} 项未通过：${fail.join('、')}`);
   process.exit(1);

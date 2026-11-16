@@ -16,6 +16,9 @@ window.__ModuleLoader__.load({
 
     const NS = 'dsh-image-prompt-forge';
     const API = '/api/prompt-forge';
+    // 本机 dsh-imagegen 插件暴露的生图代理接口；没装时返回 404，面板会给出提示。
+    const GENERATE_API = '/api/dsh-imagegen/generate';
+    const IMAGE_MAX_EDGE = 1280;
     const STORE_KEY = 'dsh-image-prompt-forge:v1';
     const HISTORY_LIMIT = 24;
 
@@ -138,6 +141,29 @@ window.__ModuleLoader__.load({
       close: '关闭',
       untitled: '未命名提示词',
       stopDone: '已停止',
+      describe: '反推图片',
+      describeHint: '上传一张参考图，倒推出它的提示词',
+      pickImage: '选一张图',
+      dropImage: '把图片拖到这里，或点「选一张图」',
+      imageReady: '已选图',
+      imageListening: '松手即反推',
+      describing: '正在读图…',
+      describeDone: '已反推',
+      fromImage: '图片反推',
+      patch: '改一句',
+      patchPlaceholder: '例如：光线换成黄昏，镜头压低一点',
+      patchHint: '只改你点名的部分，其余字段原样保留',
+      patchApply: '改',
+      patching: '正在改…',
+      needInstruction: '先写下要改什么',
+      fromPatch: '改一句',
+      preview: '试一张',
+      previewHint: '用本机生图插件按当前提示词出一张图',
+      generating: '出图中…',
+      previewTitle: '预览图',
+      noImagegen: '没找到本机的生图插件（dsh-imagegen），装好后这里就能直接出图',
+      previewFailed: '出图失败',
+      regenerate: '再出一张',
     };
 
     const en = {
@@ -202,6 +228,29 @@ window.__ModuleLoader__.load({
       close: 'Close',
       untitled: 'Untitled prompt',
       stopDone: 'Stopped',
+      describe: 'Read image',
+      describeHint: 'Upload a reference image and reverse it into a prompt',
+      pickImage: 'Pick an image',
+      dropImage: 'Drop an image here, or click “Pick an image”',
+      imageReady: 'Image ready',
+      imageListening: 'Drop to reverse it',
+      describing: 'Reading the image…',
+      describeDone: 'Reversed',
+      fromImage: 'from image',
+      patch: 'Tweak',
+      patchPlaceholder: 'e.g. switch the light to dusk, lower the camera',
+      patchHint: 'Only what you name changes; everything else stays verbatim',
+      patchApply: 'Apply',
+      patching: 'Applying…',
+      needInstruction: 'Write the change first',
+      fromPatch: 'tweaked',
+      preview: 'Try one',
+      previewHint: 'Render one image from this prompt with the local image plugin',
+      generating: 'Rendering…',
+      previewTitle: 'Preview',
+      noImagegen: 'No local image plugin (dsh-imagegen) found; install it to render from here',
+      previewFailed: 'Render failed',
+      regenerate: 'Render another',
     };
 
     const css = `
@@ -282,6 +331,21 @@ window.__ModuleLoader__.load({
 .dpf-spin{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:dpf-spin .7s linear infinite}
 @keyframes dpf-spin{to{transform:rotate(360deg)}}
 .dpf-dot{width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-text-success,#62c992);flex:none}
+.dpf-drop{margin-top:8px;padding:13px 12px;border:1px dashed var(--dsw-alias-border-default,#ffffff22);border-radius:10px;text-align:center;font-size:11.5px;color:var(--dsw-alias-text-secondary,#8b8b92);cursor:pointer;line-height:1.5;transition:border-color .16s ease,background .16s ease,color .16s ease}
+.dpf-drop:hover{border-color:var(--dsw-alias-border-focused,#ffffff3a);color:var(--dsw-alias-text-primary,#cfcfd6)}
+.dpf-drop[data-over="1"]{border-color:#8a9cff;background:#8a9cff14;color:var(--dsw-alias-text-primary,#e6e6ee)}
+.dpf-thumb{display:flex;gap:10px;align-items:center;margin-top:8px;padding:7px 9px;border:1px solid var(--dsw-alias-border-default,#ffffff12);border-radius:10px;background:var(--dsw-alias-bg-secondary,#ffffff04)}
+.dpf-thumb img{width:44px;height:44px;object-fit:cover;border-radius:7px;flex:none;border:1px solid var(--dsw-alias-border-default,#ffffff14)}
+.dpf-thumb-main{flex:1;min-width:0}
+.dpf-thumb-title{font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dpf-thumb-sub{font-size:11px;color:var(--dsw-alias-text-secondary,#86868c);margin-top:2px}
+.dpf-patch{display:flex;gap:8px;align-items:center;margin-top:10px}
+.dpf-patch input{flex:1;min-width:0;padding:8px 10px;border-radius:8px;border:1px solid var(--dsw-alias-border-default,#ffffff1c);background:var(--dsw-alias-bg-secondary,#ffffff06);color:inherit;font:inherit;font-size:12.5px}
+.dpf-patch input:focus{outline:none;border-color:var(--dsw-alias-border-focused,#ffffff3a)}
+.dpf-patch-hint{font-size:11px;color:var(--dsw-alias-text-secondary,#7d7d84);margin-top:6px}
+.dpf-preview{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+.dpf-preview img{max-width:100%;max-height:420px;border-radius:10px;border:1px solid var(--dsw-alias-border-default,#ffffff14);display:block}
+.dpf-preview-empty{font-size:12px;color:var(--dsw-alias-text-secondary,#86868c);padding:10px 0}
 @media(max-width:960px){.dpf-backdrop{padding:0}.dpf-panel{height:100%;border-radius:0}.dpf-body{grid-template-columns:1fr;overflow:auto}.dpf-left{border-right:0;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff10);overflow:visible}.dpf-right{overflow:visible}.dpf-picker{width:100%}}
 `;
 
@@ -338,6 +402,35 @@ window.__ModuleLoader__.load({
           }
           if (!payload || payload.ok !== true) throw new Error(payload?.message || `HTTP ${response.status}`);
           return payload;
+        }
+
+        /**
+         * 读一张本地图片并压到长边 1280 以内。
+         * 原图往往几 MB，直接上传既慢又容易顶到宿主上限；这里先在 canvas 里缩一次，
+         * 缩不动（解码失败）就退回原始 data URL，让宿主去判断。
+         */
+        async function readImageFile(file) {
+          const raw = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ''));
+            reader.onerror = () => reject(new Error('读取图片失败'));
+            reader.readAsDataURL(file);
+          });
+          if (raw.length < 900000) return raw;
+          try {
+            const bitmap = await createImageBitmap(file);
+            const scale = Math.min(1, IMAGE_MAX_EDGE / Math.max(bitmap.width || 1, bitmap.height || 1));
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round((bitmap.width || 1) * scale));
+            canvas.height = Math.max(1, Math.round((bitmap.height || 1) * scale));
+            const context = canvas.getContext('2d');
+            if (!context) throw new Error('no 2d context');
+            context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+            bitmap.close?.();
+            return canvas.toDataURL('image/jpeg', 0.86);
+          } catch {
+            return raw;
+          }
         }
 
         function readStore() {
@@ -442,6 +535,17 @@ window.__ModuleLoader__.load({
           const [running, setRunning] = useState(false);
           const [tab, setTab] = useState('breakdown');
           const [history, setHistory] = useState(Array.isArray(stored.history) ? stored.history.slice(0, HISTORY_LIMIT) : []);
+
+          // 反推图片 / 差量修改 / 直接出图 三块的局部状态
+          const [image, setImage] = useState(null);
+          const [describing, setDescribing] = useState(false);
+          const [dragOver, setDragOver] = useState(false);
+          const [patchText, setPatchText] = useState('');
+          const [patching, setPatching] = useState(false);
+          const [preview, setPreview] = useState([]);
+          const [previewError, setPreviewError] = useState('');
+          const [generating, setGenerating] = useState(false);
+          const fileRef = useRef(null);
           const [copied, copy] = useCopy();
 
           const mounted = useRef(true);
@@ -557,6 +661,8 @@ window.__ModuleLoader__.load({
               setResult(payload);
               setEditedPrompt(payload.prompt || '');
               setTab('breakdown');
+              setPreview([]);
+              setPreviewError('');
               const entry = {
                 id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
                 at: payload.createdAt || Date.now(),
@@ -608,6 +714,184 @@ window.__ModuleLoader__.load({
             [run],
           );
 
+          // 把一次结果塞进历史，反推与改一句共用
+          const remember = useCallback((payload) => {
+            const entry = {
+              id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+              at: payload.createdAt || Date.now(),
+              title: payload.title || t('untitled'),
+              prompt: payload.prompt || '',
+              negative: payload.negative || '',
+              fields: payload.fields || {},
+              variants: payload.variants || [],
+              notes: payload.notes || '',
+              dialect: payload.dialect,
+              style: payload.style,
+              aspect: payload.params?.aspect_ratio || '',
+              model: payload.model || '',
+              idea: payload.idea || '',
+              elapsedMs: payload.elapsedMs || 0,
+            };
+            setHistory((previous) => {
+              const next = [entry, ...previous].slice(0, HISTORY_LIMIT);
+              writeStore({ history: next });
+              return next;
+            });
+          }, [t]);
+
+          const newRunId = () => globalThis.crypto?.randomUUID?.() || `run-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+          // ── 图 → 词 ─────────────────────────────────────────────────
+          const describeFile = useCallback(
+            async (file) => {
+              if (!file || describing) return;
+              if (!file.type || !file.type.startsWith('image/')) {
+                setError(t('previewFailed'));
+                return;
+              }
+              if (!modelReady) {
+                setError(t('needModel'));
+                return;
+              }
+              setError('');
+              setNotice('');
+              setDescribing(true);
+              const runId = newRunId();
+              runIdRef.current = runId;
+              try {
+                const data = await readImageFile(file);
+                setImage({ data, name: file.name || 'reference.png' });
+                const mediaType = (/^data:([^;]+);/.exec(data) || [])[1] || file.type || 'image/png';
+                const payload = await post('describe', {
+                  runId,
+                  provider,
+                  model,
+                  dialect,
+                  style,
+                  aspect,
+                  language,
+                  idea: idea.trim(),
+                  image: { data, mediaType, name: file.name || '' },
+                });
+                if (!mounted.current || runIdRef.current !== runId) return;
+                setResult(payload);
+                setEditedPrompt(payload.prompt || '');
+                setTab('breakdown');
+                setPreview([]);
+                setPreviewError('');
+                remember(payload);
+                setNotice(t('describeDone'));
+              } catch (failure) {
+                if (!mounted.current || runIdRef.current !== runId) return;
+                setError(failure.message || String(failure));
+              } finally {
+                if (mounted.current && runIdRef.current === runId) {
+                  setDescribing(false);
+                  runIdRef.current = '';
+                }
+              }
+            },
+            [describing, modelReady, provider, model, dialect, style, aspect, language, idea, t, remember],
+          );
+
+          const pickImage = useCallback(() => {
+            fileRef.current?.click?.();
+          }, []);
+
+          // ── 词 → 改词 ───────────────────────────────────────────────
+          const applyPatch = useCallback(async () => {
+            if (!result || patching) return;
+            const instruction = patchText.trim();
+            if (!instruction) {
+              setError(t('needInstruction'));
+              return;
+            }
+            if (!modelReady) {
+              setError(t('needModel'));
+              return;
+            }
+            setError('');
+            setNotice('');
+            setPatching(true);
+            const runId = newRunId();
+            runIdRef.current = runId;
+            const base = editedPrompt || result.prompt || '';
+            try {
+              const payload = await post('patch', {
+                runId,
+                provider,
+                model,
+                instruction,
+                prompt: base,
+                fields: result.fields,
+                negative: result.negative,
+                dialect: result.dialect || dialect,
+                aspect: result.params?.aspect_ratio || aspect,
+                language: result.language || language,
+              });
+              if (!mounted.current || runIdRef.current !== runId) return;
+              setResult(payload);
+              setEditedPrompt(payload.prompt || '');
+              setPatchText('');
+              setPreview([]);
+              setPreviewError('');
+              remember(payload);
+            } catch (failure) {
+              if (!mounted.current || runIdRef.current !== runId) return;
+              setError(failure.message || String(failure));
+            } finally {
+              if (mounted.current && runIdRef.current === runId) {
+                setPatching(false);
+                runIdRef.current = '';
+              }
+            }
+          }, [result, patching, patchText, modelReady, provider, model, editedPrompt, dialect, aspect, language, t, remember]);
+
+          // ── 词 → 图（走本机 dsh-imagegen 的代理接口）─────────────────
+          const renderOne = useCallback(async () => {
+            const prompt = (editedPrompt || result?.prompt || '').trim();
+            if (!prompt || generating) return;
+            setGenerating(true);
+            setPreviewError('');
+            try {
+              const response = await fetch(GENERATE_API, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                  prompt,
+                  size: result?.params?.aspect_ratio && result.params.aspect_ratio !== 'auto' ? result.params.aspect_ratio : 'auto',
+                  n: 1,
+                }),
+              });
+              const body = await response.json().catch(() => null);
+              if (!response.ok) {
+                if (response.status === 404) throw new Error(t('noImagegen'));
+                throw new Error((body && body.message) || `HTTP ${response.status}`);
+              }
+              if (!body || body.ok === false) throw new Error((body && body.message) || t('previewFailed'));
+              const shots = (Array.isArray(body.images) ? body.images : [])
+                .filter((item) => item && typeof item.b64 === 'string' && item.b64)
+                .map((item) => ({ b64: item.b64, mime: item.mime || 'image/png' }));
+              if (shots.length === 0) throw new Error(t('previewFailed'));
+              setPreview(shots);
+            } catch (failure) {
+              const message = failure?.message || String(failure);
+              setPreviewError(/404|Failed to fetch|not found|NetworkError/i.test(message) ? t('noImagegen') : message);
+            } finally {
+              setGenerating(false);
+            }
+          }, [editedPrompt, result, generating, t]);
+
+          const onDropImage = useCallback(
+            (event) => {
+              event.preventDefault();
+              setDragOver(false);
+              const file = event.dataTransfer?.files?.[0];
+              if (file) void describeFile(file);
+            },
+            [describeFile],
+          );
+
           const restore = useCallback(
             (entry) => {
               setResult({
@@ -629,6 +913,8 @@ window.__ModuleLoader__.load({
               setEditedPrompt(entry.prompt || '');
               setTab('breakdown');
               setError('');
+              setPreview([]);
+              setPreviewError('');
             },
             [],
           );
@@ -761,6 +1047,54 @@ window.__ModuleLoader__.load({
                       onKeyDown: onKeyDownIdea,
                       onChange: (event) => setIdea(event.target.value),
                     }),
+                    h('input', {
+                      type: 'file',
+                      accept: 'image/*',
+                      ref: fileRef,
+                      style: { display: 'none' },
+                      onChange: (event) => {
+                        const file = event.target.files && event.target.files[0];
+                        event.target.value = '';
+                        if (file) void describeFile(file);
+                      },
+                    }),
+                    image
+                      ? h(
+                          'div',
+                          { className: 'dpf-thumb' },
+                          h('img', { src: image.data, alt: '' }),
+                          h(
+                            'div',
+                            { className: 'dpf-thumb-main' },
+                            h('div', { className: 'dpf-thumb-title' }, image.name || t('imageReady')),
+                            h('div', { className: 'dpf-thumb-sub' }, describing ? t('describing') : t('describeDone')),
+                          ),
+                          h('button', { className: 'dpf-btn dpf-btn-ghost dpf-btn-small', type: 'button', onClick: () => setImage(null) }, t('clear')),
+                        )
+                      : h(
+                          'div',
+                          {
+                            className: 'dpf-drop',
+                            'data-over': dragOver ? '1' : undefined,
+                            role: 'button',
+                            tabIndex: 0,
+                            title: t('describeHint'),
+                            onClick: pickImage,
+                            onKeyDown: (event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                pickImage();
+                              }
+                            },
+                            onDragOver: (event) => {
+                              event.preventDefault();
+                              setDragOver(true);
+                            },
+                            onDragLeave: () => setDragOver(false),
+                            onDrop: onDropImage,
+                          },
+                          describing ? t('describing') : dragOver ? t('imageListening') : t('dropImage'),
+                        ),
                   ),
                   h(
                     'div',
@@ -918,6 +1252,17 @@ window.__ModuleLoader__.load({
                         h('span', { className: 'dpf-card-title' }, t('prompt')),
                         h('div', { className: 'dpf-spacer' }),
                         h('button', { className: 'dpf-btn dpf-btn-ghost dpf-btn-small', type: 'button', onClick: reuse }, t('again')),
+                        h(
+                          'button',
+                          {
+                            className: 'dpf-btn dpf-btn-ghost dpf-btn-small',
+                            type: 'button',
+                            disabled: generating,
+                            title: t('previewHint'),
+                            onClick: () => void renderOne(),
+                          },
+                          generating ? t('generating') : t('preview'),
+                        ),
                         h('button', { className: 'dpf-btn dpf-btn-small', type: 'button', onClick: () => copy(editedPrompt || result.prompt, 'main') }, copied === 'main' ? t('copied') : t('copy')),
                       ),
                       h('textarea', {
@@ -926,6 +1271,32 @@ window.__ModuleLoader__.load({
                         spellCheck: false,
                         onChange: (event) => setEditedPrompt(event.target.value),
                       }),
+                      h(
+                        'div',
+                        null,
+                        h(
+                          'div',
+                          { className: 'dpf-patch' },
+                          h('input', {
+                            value: patchText,
+                            maxLength: 600,
+                            placeholder: t('patchPlaceholder'),
+                            onChange: (event) => setPatchText(event.target.value),
+                            onKeyDown: (event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault();
+                                void applyPatch();
+                              }
+                            },
+                          }),
+                          h(
+                            'button',
+                            { className: 'dpf-btn dpf-btn-small', type: 'button', disabled: patching, onClick: () => void applyPatch() },
+                            patching ? '…' : t('patchApply'),
+                          ),
+                        ),
+                        h('div', { className: 'dpf-patch-hint' }, t('patchHint')),
+                      ),
                       h(
                         'div',
                         { className: 'dpf-meta' },
@@ -938,6 +1309,30 @@ window.__ModuleLoader__.load({
                         result.elapsedMs ? h('span', { className: 'dpf-pill' }, `${t('elapsed')} ${(result.elapsedMs / 1000).toFixed(1)}s`) : null,
                         result.model ? h('span', { className: 'dpf-pill' }, result.model) : null,
                       ),
+                    ),
+                  (preview.length > 0 || previewError || generating) &&
+                    h(
+                      'div',
+                      { className: 'dpf-card' },
+                      h(
+                        'div',
+                        { className: 'dpf-card-head' },
+                        h('span', { className: 'dpf-card-title' }, t('previewTitle')),
+                        h('div', { className: 'dpf-spacer' }),
+                        h(
+                          'button',
+                          { className: 'dpf-btn dpf-btn-ghost dpf-btn-small', type: 'button', disabled: generating, onClick: () => void renderOne() },
+                          generating ? t('generating') : t('regenerate'),
+                        ),
+                      ),
+                      previewError ? h('div', { className: 'dpf-error' }, previewError) : null,
+                      generating && preview.length === 0 ? h('div', { className: 'dpf-preview-empty' }, t('generating')) : null,
+                      preview.length > 0 &&
+                        h(
+                          'div',
+                          { className: 'dpf-preview' },
+                          preview.map((shot, index) => h('img', { key: index, src: `data:${shot.mime};base64,${shot.b64}`, alt: '' })),
+                        ),
                     ),
                   result?.negative &&
                     h(

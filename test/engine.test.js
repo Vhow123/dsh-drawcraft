@@ -2,12 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CATALOG,
+  buildDescribeSystemPrompt,
+  buildDescribeUserPrompt,
+  buildPatchSystemPrompt,
+  buildPatchUserPrompt,
   buildSystemPrompt,
   buildUserPrompt,
   extractJson,
   findDialect,
   normalizeResult,
+  runDescribe,
   runOptimize,
+  runPatch,
   stitch,
   stripFiller,
   stripMidjourneyParams,
@@ -187,3 +193,88 @@ test('runOptimize honours an already-aborted caller signal', async () => {
   };
   await assert.rejects(runOptimize(llm, { provider: 'p', model: 'm', idea: 'anything' }, controller.signal));
 });
+
+// ── image → prompt ───────────────────────────────────────────────────────────
+
+test('buildDescribeSystemPrompt pins the dialect and the framing rules', () => {
+  const system = buildDescribeSystemPrompt({ dialect: 'midjourney', aspect: '16:9', language: 'zh' });
+  assert.match(system, /reverse engineering/i);
+  assert.match(system, /TARGET DIALECT — Midjourney/);
+  assert.match(system, /16:9/);
+  assert.match(system, /Simplified Chinese/);
+  assert.match(system, /masterpiece/);
+  assert.equal(buildDescribeUserPrompt({}), 'Please reverse-engineer the attached image into a generation prompt.');
+});
+
+test('runDescribe needs a model and an image block', async () => {
+  const llm = fakeLlm(GOOD);
+  await assert.rejects(runDescribe(llm, { image: {} }), (error) => error.code === 'MODEL_REQUIRED');
+  await assert.rejects(
+    runDescribe(llm, { provider: 'p', model: 'm', content: [{ type: 'text', text: 'hi' }] }),
+    (error) => error.code === 'IMAGE_REQUIRED',
+  );
+  assert.equal(llm.calls.length, 0);
+});
+
+test('runDescribe forwards the image block and returns a normalised result', async () => {
+  const llm = fakeLlm(GOOD);
+  const attachment = { attachmentId: 'att-1', mediaType: 'image/png' };
+  const result = await runDescribe(llm, {
+    provider: 'demo',
+    model: 'vision-1',
+    dialect: 'natural-en',
+    content: [
+      { type: 'text', text: 'reverse this' },
+      { type: 'image', attachment },
+    ],
+  });
+  const sent = llm.calls[0];
+  assert.equal(sent.messages[0].content.length, 2);
+  assert.equal(sent.messages[0].content[1].type, 'image');
+  assert.equal(sent.messages[0].content[1].attachment.attachmentId, 'att-1');
+  assert.equal(sent.temperature, 0.4);
+  assert.equal(result.source, 'image');
+  assert.ok(result.prompt.length > 0);
+});
+
+// ── prompt → prompt ──────────────────────────────────────────────────────────
+
+test('buildPatchUserPrompt shows the current fields and the change request', () => {
+  const prompt = buildPatchUserPrompt({
+    fields: { subject: 'a brass helmet', lighting: 'one hard key light' },
+    prompt: 'a brass helmet, one hard key light',
+    instruction: 'switch the light to dusk',
+  });
+  assert.match(prompt, /CURRENT FIELDS/);
+  assert.match(prompt, /a brass helmet/);
+  assert.match(prompt, /CHANGE REQUEST: switch the light to dusk/);
+  assert.match(buildPatchSystemPrompt({}), /verbatim/);
+});
+
+test('runPatch refuses to start without an instruction', async () => {
+  const llm = fakeLlm(GOOD);
+  await assert.rejects(
+    runPatch(llm, { provider: 'p', model: 'm', prompt: 'something' }),
+    (error) => error.code === 'INSTRUCTION_REQUIRED',
+  );
+  assert.equal(llm.calls.length, 0);
+});
+
+test('runPatch returns the rewritten prompt and keeps the instruction', async () => {
+  const llm = fakeLlm(GOOD);
+  const result = await runPatch(llm, {
+    provider: 'demo',
+    model: 'm',
+    prompt: 'a brass helmet, one hard key light',
+    instruction: '光线换成黄昏',
+    dialect: 'midjourney',
+    aspect: '3:2',
+  });
+  const sent = llm.calls[0];
+  assert.equal(sent.temperature, 0.3);
+  assert.match(sent.messages[0].content[0].text, /光线换成黄昏/);
+  assert.match(result.prompt, /--ar 3:2/);
+  assert.equal(result.source, 'patch');
+  assert.equal(result.instruction, '光线换成黄昏');
+});
+

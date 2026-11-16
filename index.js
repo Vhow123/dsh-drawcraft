@@ -1,10 +1,12 @@
 /**
  * dsh-image-prompt-forge host half.
  *
- * Registers three loopback-only JSON routes for the browser panel and one agent
- * tool, all of them delegating the actual prompt work to engine.js:
+ * Registers loopback-only JSON routes for the browser panel and two agent tools,
+ * all of them delegating the actual prompt work to engine.js:
  *   POST /api/prompt-forge/catalog  → styles/dialects/modes + live model list + saved config
- *   POST /api/prompt-forge/optimize → one structured optimization run
+ *   POST /api/prompt-forge/optimize → one structured optimization run (idea → prompt)
+ *   POST /api/prompt-forge/describe → one image → prompt run (needs a vision model)
+ *   POST /api/prompt-forge/patch    → one-line delta edit applied to an existing result
  *   POST /api/prompt-forge/stop     → abort a running optimization by runId
  *   POST /api/prompt-forge/config   → persist the default provider/model and last-used options
  *
@@ -16,16 +18,19 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import {
+  buildDescribeUserPrompt,
   CATALOG,
   FIELD_LABELS,
   FIELD_ORDER,
   findDialect,
   findStyle,
   normalizeCandidates,
+  runDescribe,
   runOptimize,
+  runPatch,
 } from './engine.js';
 
-export { CATALOG, runOptimize } from './engine.js';
+export { CATALOG, runDescribe, runOptimize, runPatch } from './engine.js';
 
 export const name = 'prompt-forge';
 export const inject = ['webServer', 'llm'];
@@ -327,7 +332,7 @@ function describeTool() {
 }
 
 function registerTools(ctx, llm, resolveConfig) {
-  return ctx.tools.register(
+  const disposeOptimize = ctx.tools.register(
     defineTool({
       name: 'optimize_image_prompt',
       description: describeTool(),
@@ -398,9 +403,138 @@ function registerTools(ctx, llm, resolveConfig) {
       },
     }),
   );
+  const disposePatch = ctx.tools.register(
+    defineTool({
+      name: 'patch_image_prompt',
+      description: [
+        'Apply one short natural-language change to an existing image-generation prompt without regenerating the whole thing.',
+        '',
+        'Use this after optimize_image_prompt when the user says something like "make it dusk", "lower the camera", "remove the rain": the tool rewrites only the fields that instruction touches and copies the rest verbatim, so the scene does not drift.',
+        '',
+        'It returns the complete rewritten prompt, the changed field breakdown, and one line naming what changed.',
+      ].join('\n'),
+      parameters: {
+        prompt: {
+          type: 'string',
+          required: true,
+          description: 'The current final prompt to edit, verbatim.',
+        },
+        instruction: {
+          type: 'string',
+          required: true,
+          description: 'The one change to make, in the user own words, for example "光线换成黄昏" or "camera lower, closer".',
+        },
+        dialect: {
+          type: 'string',
+          description: 'Target model dialect of the existing prompt: natural-en, natural-zh, gpt-image, midjourney, stable-diffusion, nano-banana.',
+        },
+        aspect: {
+          type: 'string',
+          description: 'Aspect ratio such as 1:1, 4:3, 16:9, 9:16, or auto.',
+        },
+        language: {
+          type: 'string',
+          description: 'Language of the existing prompt text: en or zh.',
+        },
+        negative: {
+          type: 'string',
+          description: 'The current negative prompt, if any.',
+        },
+      },
+      output: {
+        schema: { type: 'string' },
+        render: (_args, value) => [{ type: 'text', text: value }],
+      },
+      async execute(args, exec) {
+        const config = await resolveConfig();
+        if (!config.provider || !config.model) {
+          throw new Error('提示词工坊还没有选择优化用的对话模型：请在侧边栏打开「提示词工坊」面板，在顶部选择 provider 与 model 并保存。');
+        }
+        const result = await runPatch(
+          llm,
+          {
+            provider: config.provider,
+            model: config.model,
+            prompt: args.prompt,
+            instruction: args.instruction,
+            negative: args.negative || config.mustAvoid,
+            dialect: args.dialect || config.dialect,
+            aspect: args.aspect || config.aspect,
+            language: args.language || config.language,
+          },
+          exec?.signal,
+        );
+        return formatToolResult(result);
+      },
+    }),
+  );
+  return () => {
+    disposePatch();
+    disposeOptimize();
+  };
 }
 
 // ── plugin entry ─────────────────────────────────────────────────────────────
+
+const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+const IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+
+/**
+ * Turn one browser upload (`{ data, mediaType?, name? }`, base64 or data URL)
+ * into a durable attachment reference the LLM message can carry.
+ * The attachment service is read lazily: a host without it still loads this
+ * plugin, and only the image → prompt direction reports a clear error.
+ * @param ctx - plugin context.
+ * @param image - the uploaded payload.
+ * @returns the durable attachment reference.
+ */
+async function admitImage(ctx, image) {
+  let attachments;
+  try {
+    attachments = typeof ctx?.get === 'function' ? ctx.get('attachments') : undefined;
+  } catch {
+    attachments = undefined;
+  }
+  if (!attachments || typeof attachments.saveImages !== 'function') {
+    const error = new Error('当前宿主没有启用附件服务，暂时不能反推图片');
+    error.code = 'ATTACHMENT_UNAVAILABLE';
+    throw error;
+  }
+  const raw = typeof image?.data === 'string' ? image.data : '';
+  const computed = /^data:([a-z]+)\/([a-z0-9.+-]+);base64,/i.exec(raw);
+  const data = raw.replace(/^data:[^;]*;base64,/i, '').replace(/\s+/g, '');
+  if (!data) {
+    const error = new Error('请先选一张参考图');
+    error.code = 'IMAGE_REQUIRED';
+    throw error;
+  }
+  const mediaType = IMAGE_MEDIA_TYPES.has(image?.mediaType)
+    ? image.mediaType
+    : IMAGE_MEDIA_TYPES.has(computed ? `${computed[1]}/${computed[2]}`.toLowerCase() : '')
+      ? `${computed[1]}/${computed[2]}`.toLowerCase()
+      : 'image/png';
+  const bytes = Buffer.from(data, 'base64');
+  if (bytes.length === 0) {
+    const error = new Error('这张图片没有内容，换一张再试');
+    error.code = 'IMAGE_EMPTY';
+    throw error;
+  }
+  if (bytes.length > MAX_IMAGE_BYTES) {
+    const error = new Error(`图片太大（${(bytes.length / 1048576).toFixed(1)}MB），请压缩到 12MB 以内`);
+    error.code = 'IMAGE_TOO_LARGE';
+    throw error;
+  }
+  const refs = await attachments.saveImages([
+    { data: bytes, mediaType, ...(typeof image?.name === 'string' && image.name ? { name: image.name.slice(0, 120) } : {}) },
+  ]);
+  const ref = Array.isArray(refs) ? refs[0] : refs;
+  if (!ref) {
+    const error = new Error('这张图片没能存进附件库，换一张再试');
+    error.code = 'IMAGE_NOT_ADMITTED';
+    throw error;
+  }
+  return ref;
+}
 
 export function apply(ctx) {
   const activeRuns = new Map();
@@ -437,6 +571,43 @@ export function apply(ctx) {
                 mustAvoid: body.mustAvoid ?? '',
               }).catch(() => undefined);
             }
+            writeJson(res, 200, result);
+          } finally {
+            if (runId && activeRuns.get(runId) === controller) activeRuns.delete(runId);
+          }
+        }),
+      ),
+      ctx.webServer.register(
+        route(`${API}/describe`, async (req, res) => {
+          const body = await readJson(req);
+          const runId = typeof body.runId === 'string' ? body.runId.slice(0, 80) : '';
+          const controller = runId ? beginRun(runId) : new AbortController();
+          try {
+            const attachment = await admitImage(ctx, body.image);
+            const result = await runDescribe(
+              ctx.llm,
+              {
+                ...body,
+                content: [
+                  { type: 'text', text: buildDescribeUserPrompt(body) },
+                  { type: 'image', attachment },
+                ],
+              },
+              controller.signal,
+            );
+            writeJson(res, 200, result);
+          } finally {
+            if (runId && activeRuns.get(runId) === controller) activeRuns.delete(runId);
+          }
+        }),
+      ),
+      ctx.webServer.register(
+        route(`${API}/patch`, async (req, res) => {
+          const body = await readJson(req);
+          const runId = typeof body.runId === 'string' ? body.runId.slice(0, 80) : '';
+          const controller = runId ? beginRun(runId) : new AbortController();
+          try {
+            const result = await runPatch(ctx.llm, body, controller.signal);
             writeJson(res, 200, result);
           } finally {
             if (runId && activeRuns.get(runId) === controller) activeRuns.delete(runId);

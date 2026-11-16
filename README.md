@@ -41,11 +41,24 @@ dsh plugin --profile desktop add github:Vhow123/dsh-prompt-forge
 
 这十一个字段同时是模型的输出结构：模型返回 JSON，插件做归一化与拼装兜底，所以模型跑偏时你看到的是缺字段，而不是一段没法用的长文。
 
+## 三个方向
+
+同一个面板里有三条互通的路径，产物都是同一份结构化结果，可以互相接力：
+
+| 方向 | 入口 | 说明 |
+| --- | --- | --- |
+| 想法 → 词 | 写描述 → 「优化提示词」 | 主路径：把模糊想法整理成可执行提示词 |
+| 图 → 词 | 把图拖进「把图片拖到这里」，或点「选一张图」 | 需要能看图的对话模型；倒推出同一套 11 字段与最终提示词，可继续改方言 |
+| 词 → 改词 | 结果卡片里的「改一句」输入框 | 写「光线换成黄昏」「镜头压低一点」，只改你点名的字段，其余逐字保留 |
+| 词 → 图 | 结果卡片右上「试一张」 | 走本机 `dsh-imagegen` 插件的生图代理，直接把当前提示词渲成预览图；没装该插件时给出提示而不是报错 |
+
+反推与改一句都会消耗一次对话模型请求；试一张消耗的是图像模型额度。
+
 ## 用法
 
 **面板**：侧边栏中部「提示词工坊」→ 顶部选 provider / model（必须选一次，之后记住）→ 写想法 → `Ctrl+Enter`。右栏可直接改、复制、或从历史里翻回上一次。描述输入框右上角的「清空」把这段描述一次性清掉，不动你已经选好的方言、风格与画幅。
 
-**Agent 工具**：对话里直接说「帮我写一个 xx 的生图提示词」，模型会调用 `optimize_image_prompt`。它在没有任何面板打开时也能用，配置从 `~/.dsh/prompt-forge.json` 读。
+**Agent 工具**：对话里直接说「帮我写一个 xx 的生图提示词」，模型会调用 `optimize_image_prompt`；说「把它改成黄昏」这类微调，模型会调用 `patch_image_prompt`（只重写被点名的字段）。两个工具在没有任何面板打开时也能用，配置从 `~/.dsh/prompt-forge.json` 读。
 
 ## 配置
 
@@ -57,17 +70,20 @@ dsh plugin --profile desktop add github:Vhow123/dsh-prompt-forge
 | 路由 | 作用 |
 | --- | --- |
 | `POST /api/prompt-forge/catalog` | 可用 provider/model 列表 + 方言/风格/模式目录 + 当前配置 |
-| `POST /api/prompt-forge/optimize` | 执行一次优化；`runId` 可中途 `/stop` |
+| `POST /api/prompt-forge/optimize` | 想法 → 词；`runId` 可中途 `/stop` |
+| `POST /api/prompt-forge/describe` | 图 → 词：`image.data` 传 base64 或 data URL，宿主持久化成附件再交给视觉模型 |
+| `POST /api/prompt-forge/patch` | 词 → 改词：`prompt` + `instruction`，未点名的字段原样保留 |
 | `POST /api/prompt-forge/stop` | 按 runId 取消 |
 | `POST /api/prompt-forge/config` | 读/写配置 |
 
-全部只接受本机同源请求。
+全部只接受本机同源请求。「试一张」不经过本插件：面板直接调用本机 `dsh-imagegen` 的 `POST /api/dsh-imagegen/generate`，所以没装生图插件时只是这一块不可用。
 
 ## 开发
 
 ```bash
-node --test test/*.test.js      # 引擎与路由单测（23 项）
+node --test test/*.test.js      # 引擎、路由与工具契约单测（33 项）
 node test/bare-import.mjs       # 裸加载验证：不重定向任何宿主包直接 import
+node test/client-contract.mjs   # 浏览器半的槽位、词典与渲染钩子契约
 node --check index.js client.js engine.js
 ```
 
@@ -85,9 +101,9 @@ node --check index.js client.js engine.js
 ## 文件
 
 ```
-index.js            宿主半：四条路由 + optimize_image_prompt 工具 + 配置持久化
-client.js           浏览器半：侧边栏 panellist 图标 + 主区面板 + 拍平词典
-engine.js           纯函数引擎：目录、提示词拼装、方言规整、LLM 调用与错误映射
+index.js            宿主半：六条路由 + optimize_image_prompt / patch_image_prompt 工具 + 配置持久化
+client.js           浏览器半：侧边栏 panellist 图标 + 主区面板 + 拖图反推 / 改一句 / 试一张 + 拍平词典
+engine.js           纯函数引擎：目录、三种方向的提示词构造、方言规整、LLM 调用与错误映射
 cordis.patch.yml    bundle 补丁：把自己 insert 进插件树
-test/               引擎单测 + 裸加载验证
+test/               引擎单测 + 路由契约 + 裸加载验证 + 浏览器半契约
 ```

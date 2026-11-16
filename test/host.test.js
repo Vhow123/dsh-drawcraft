@@ -92,8 +92,21 @@ before(async () => {
     disposers.push(dispose);
   };
 
+  const services = new Map();
+  services.set('attachments', {
+    async saveImages(inputs) {
+      return inputs.map((input, index) => ({
+        attachmentId: `att-${index}`,
+        mediaType: input.mediaType,
+        bytes: input.data.length,
+        ...(input.name ? { name: input.name } : {}),
+      }));
+    },
+  });
+
   const ctx = {
     llm: fakeLlm,
+    get: (serviceName) => services.get(serviceName),
     webServer: {
       register: (route) => {
         routes.set(route.path, route);
@@ -157,14 +170,16 @@ test('exposes the plugin identity and services it needs', { skip }, () => {
   assert.equal(typeof mod.apply, 'function');
 });
 
-test('registers four routes and the agent tool', { skip }, () => {
+test('registers every route and both agent tools', { skip }, () => {
   assert.deepEqual([...routes.keys()].sort(), [
     '/api/prompt-forge/catalog',
     '/api/prompt-forge/config',
+    '/api/prompt-forge/describe',
     '/api/prompt-forge/optimize',
+    '/api/prompt-forge/patch',
     '/api/prompt-forge/stop',
   ]);
-  assert.deepEqual([...tools.keys()], ['optimize_image_prompt']);
+  assert.deepEqual([...tools.keys()], ['optimize_image_prompt', 'patch_image_prompt']);
 });
 
 test('catalog route reports models and the prompt catalog', { skip }, async () => {
@@ -231,6 +246,45 @@ test('the agent tool renders a readable report', { skip }, async () => {
   assert.equal(typeof text, 'string');
   assert.ok(text.startsWith('【最终提示词】'), text.slice(0, 40));
   assert.ok(text.includes('【画面拆解】'));
+});
+
+test('describe admits the upload and forwards it as an image block', { skip }, async () => {
+  const { body } = await call('/api/prompt-forge/describe', {
+    provider: 'demo',
+    model: 'demo-model',
+    dialect: 'natural-en',
+    image: { data: `data:image/png;base64,${Buffer.from('fake-png-bytes').toString('base64')}`, mediaType: 'image/png', name: 'ref.png' },
+  });
+  assert.equal(body.ok, true);
+  assert.equal(body.source, 'image');
+  assert.ok(body.prompt.length > 0);
+});
+
+test('describe reports a missing image instead of calling the model', { skip }, async () => {
+  const { body } = await call('/api/prompt-forge/describe', { provider: 'demo', model: 'demo-model', image: { data: '' } });
+  assert.equal(body.ok, false);
+  assert.equal(body.code, 'IMAGE_REQUIRED');
+});
+
+test('patch rewrites the prompt and echoes the instruction', { skip }, async () => {
+  const { body } = await call('/api/prompt-forge/patch', {
+    provider: 'demo',
+    model: 'demo-model',
+    prompt: 'a brass diving helmet',
+    instruction: '光线换成黄昏',
+    dialect: 'midjourney',
+    aspect: '3:2',
+  });
+  assert.equal(body.ok, true);
+  assert.equal(body.source, 'patch');
+  assert.equal(body.instruction, '光线换成黄昏');
+  assert.ok(body.prompt.includes('--ar 3:2'));
+});
+
+test('patch refuses to run without an instruction', { skip }, async () => {
+  const { body } = await call('/api/prompt-forge/patch', { provider: 'demo', model: 'demo-model', prompt: 'something' });
+  assert.equal(body.ok, false);
+  assert.equal(body.code, 'INSTRUCTION_REQUIRED');
 });
 
 test('disposing the plugin unregisters everything', { skip }, () => {

@@ -393,11 +393,14 @@ export function normalizeResult(raw, input = {}) {
   let negative = typeof raw?.negative === 'string' ? stripFiller(oneLine(raw.negative, 600)) : '';
   if (!prompt && negative) prompt = negative;
 
-  const ratio = ASPECTS.includes(raw?.params?.aspect_ratio)
-    ? raw.params.aspect_ratio
-    : aspect !== 'auto'
+  // An explicit aspect is the user's decision; only when they left it on auto
+  // does the model get to report the ratio it composed for.
+  const ratio =
+    aspect !== 'auto'
       ? aspect
-      : '16:9';
+      : ASPECTS.includes(raw?.params?.aspect_ratio)
+        ? raw.params.aspect_ratio
+        : '16:9';
 
   if (dialect.key === 'midjourney') {
     const base = stripMidjourneyParams(prompt);
@@ -451,37 +454,29 @@ function redact(text) {
 }
 
 /**
- * Stream an optimization run through the harness LLM service.
- * @param llm - the cordis `llm` service (needs `stream`).
- * @param input - the panel/tool payload.
- * @param signal - caller-owned AbortSignal.
+ * Shared streaming call: one system prompt, one user content array, raw text back.
+ * Every run* helper funnels through here so timeouts, aborts, finish handling
+ * and redaction behave identically no matter which direction the request goes.
+ * @internal
  */
-export async function runOptimize(llm, input = {}, signal) {
-  const provider = oneLine(input.provider, 120);
-  const model = oneLine(input.model, 160);
+async function callModel(llm, spec, signal) {
+  const provider = oneLine(spec.provider, 120);
+  const model = oneLine(spec.model, 160);
   if (!provider || !model) {
     const error = new Error('请先在工作台顶部选择优化用的对话模型');
     error.code = 'MODEL_REQUIRED';
     throw error;
   }
-  const idea = oneLine(input.idea, MAX_IDEA_CHARS);
-  if (!idea) {
-    const error = new Error('请先写下你想画的画面');
-    error.code = 'IDEA_REQUIRED';
-    throw error;
-  }
-  if (idea.length < 2) {
-    const error = new Error('画面描述太短，至少写两个字符');
-    error.code = 'IDEA_TOO_SHORT';
-    throw error;
-  }
-  const candidates = normalizeCandidates(input.candidates ?? 1);
-  const timeoutMs = Math.max(8000, Math.min(180000, Number(input.timeoutMs) || 90000));
+  const label = spec.label || '优化';
+  const timeoutMs = Math.max(8000, Math.min(180000, Number(spec.timeoutMs) || 90000));
   const controller = new AbortController();
-  const abort = () => controller.abort(new Error('已停止优化'));
+  const abort = () => controller.abort(new Error(`已停止${label}`));
   if (signal?.aborted) abort();
   else signal?.addEventListener('abort', abort, { once: true });
-  const timer = setTimeout(() => controller.abort(new Error(`优化超时（${Math.round(timeoutMs / 1000)} 秒）`)), timeoutMs);
+  const timer = setTimeout(
+    () => controller.abort(new Error(`${label}超时（${Math.round(timeoutMs / 1000)} 秒）`)),
+    timeoutMs,
+  );
   const startedAt = Date.now();
   let text = '';
   let finishKind;
@@ -490,10 +485,10 @@ export async function runOptimize(llm, input = {}, signal) {
     const stream = llm.stream({
       provider,
       model,
-      system: buildSystemPrompt({ ...input, candidates }),
-      messages: [{ role: 'user', content: [{ type: 'text', text: buildUserPrompt({ ...input, candidates }) }] }],
-      temperature: 0.75,
-      maxTokens: Math.max(1200, Math.min(6000, Number(input.maxTokens) || (candidates > 1 ? 3600 : 2600))),
+      system: spec.system,
+      messages: [{ role: 'user', content: spec.content }],
+      temperature: spec.temperature ?? 0.75,
+      maxTokens: Math.max(1200, Math.min(6000, Number(spec.maxTokens) || 2600)),
       signal: controller.signal,
     });
     for await (const chunk of stream) {
@@ -513,27 +508,10 @@ export async function runOptimize(llm, input = {}, signal) {
       error.code = 'INCOMPLETE_STREAM';
       throw error;
     }
-    const parsed = extractJson(text);
-    if (!parsed) {
-      const error = new Error('模型没有按 JSON 契约回复，可再试一次或换个模型');
-      error.code = 'BAD_OUTPUT';
-      error.raw = redact(text);
-      throw error;
-    }
-    const result = normalizeResult(parsed, { ...input, candidates });
-    if (!result.prompt) {
-      const error = new Error('模型返回的提示词为空，可再试一次或换个模型');
-      error.code = 'EMPTY_PROMPT';
-      throw error;
-    }
-    result.elapsedMs = Date.now() - startedAt;
-    result.provider = provider;
-    result.model = model;
-    result.usage = undefined;
-    return result;
+    return { text, elapsedMs: Date.now() - startedAt, provider, model };
   } catch (error) {
     if (controller.signal.aborted && !signal?.aborted) {
-      const timeout = new Error(`优化超时（${Math.round(timeoutMs / 1000)} 秒）`);
+      const timeout = new Error(`${label}超时（${Math.round(timeoutMs / 1000)} 秒）`);
       timeout.code = 'TIMEOUT';
       throw timeout;
     }
@@ -546,6 +524,303 @@ export async function runOptimize(llm, input = {}, signal) {
   }
 }
 
+/**
+ * Stream an optimization run through the harness LLM service.
+ * @param llm - the cordis `llm` service (needs `stream`).
+ * @param input - the panel/tool payload.
+ * @param signal - caller-owned AbortSignal.
+ */
+export async function runOptimize(llm, input = {}, signal) {
+  if (!oneLine(input.provider, 120) || !oneLine(input.model, 160)) {
+    const error = new Error('请先在工作台顶部选择优化用的对话模型');
+    error.code = 'MODEL_REQUIRED';
+    throw error;
+  }
+  const idea = oneLine(input.idea, MAX_IDEA_CHARS);
+  if (!idea) {
+    const error = new Error('请先写下你想画的画面');
+    error.code = 'IDEA_REQUIRED';
+    throw error;
+  }
+  if (idea.length < 2) {
+    const error = new Error('画面描述太短，至少写两个字符');
+    error.code = 'IDEA_TOO_SHORT';
+    throw error;
+  }
+  const candidates = normalizeCandidates(input.candidates ?? 1);
+  const call = await callModel(
+    llm,
+    {
+      provider: input.provider,
+      model: input.model,
+      system: buildSystemPrompt({ ...input, candidates }),
+      content: [{ type: 'text', text: buildUserPrompt({ ...input, candidates }) }],
+      temperature: 0.75,
+      maxTokens: Number(input.maxTokens) || (candidates > 1 ? 3600 : 2600),
+      timeoutMs: input.timeoutMs,
+      label: '优化',
+    },
+    signal,
+  );
+  const parsed = extractJson(call.text);
+  if (!parsed) {
+    const error = new Error('模型没有按 JSON 契约回复，可再试一次或换个模型');
+    error.code = 'BAD_OUTPUT';
+    error.raw = redact(call.text);
+    throw error;
+  }
+  const result = normalizeResult(parsed, { ...input, candidates });
+  if (!result.prompt) {
+    const error = new Error('模型返回的提示词为空，可再试一次或换个模型');
+    error.code = 'EMPTY_PROMPT';
+    throw error;
+  }
+  result.elapsedMs = call.elapsedMs;
+  result.provider = call.provider;
+  result.model = call.model;
+  return result;
+}
+
+/* ------------------------------------------------------------------ */
+/* image -> prompt                                                     */
+/* ------------------------------------------------------------------ */
+
+const DESCRIBE_SYSTEM = [
+  'You are a senior AI image prompt engineer doing reverse engineering. You are shown ONE reference image and must describe it precisely enough that the same picture could be regenerated from your words alone.',
+  '',
+  'HARD RULES',
+  '1. Describe what is actually there, not what you would have designed. Count the subjects, name the visible materials, quote any legible in-image text verbatim in quotation marks.',
+  '2. Infer the camera: apparent focal length, height, distance, depth of field, and whether it reads as photograph, illustration, 3D render or painting.',
+  '3. Infer the light: direction, quality (hard/soft), colour temperature, and whether the source is practical, daylit or studio.',
+  '4. Never pad with empty praise tokens. Banned: masterpiece, best quality, ultra detailed, 8k, award winning, trending on artstation, hyper realistic, "highly detailed".',
+  '5. No repetition across fields. Each field adds information; a fact stated in `lighting` is not restated in `details`.',
+  '6. Keep `prompt` under 1800 characters, each field under 220 characters.',
+  '7. Return exactly ONE JSON object and nothing else: no markdown fence, no explanation before or after.',
+  '',
+  'JSON SHAPE',
+  '{',
+  '  "title": "short label for the image, at most 24 characters",',
+  '  "fields": {',
+  '    "subject": "who or what, with count and identifying detail",',
+  '    "action": "pose, gesture, motion or state",',
+  '    "environment": "place, background layers, weather or time",',
+  '    "composition": "framing, camera angle, subject placement, negative space",',
+  '    "lighting": "key/fill/rim or practical sources, direction, quality, colour temperature",',
+  '    "camera": "lens, aperture, distance, depth of field, film or sensor feel",',
+  '    "style": "medium and visual language actually used",',
+  '    "palette": "dominant colours and overall tonal range",',
+  '    "materials": "surface and texture truth: fabric, metal, skin, paint",',
+  '    "mood": "emotional register and atmosphere",',
+  '    "details": "two or three small story-bearing details visible in the frame"',
+  '  },',
+  '  "prompt": "the final prompt, written exactly for the target dialect below",',
+  '  "negative": "comma-separated things this image avoids; empty string when the dialect ignores negatives",',
+  '  "params": { "aspect_ratio": "the ratio the image itself has", "quality": "high" },',
+  '  "variants": ["one-line alternate direction that would also fit"],',
+  '  "notes": "one short practical tip about reproducing this look"',
+  '}',
+  '',
+  'Answer in English. The host translates field labels for display; the prompt text itself must follow the TARGET DIALECT rules below.',
+].join('\n');
+
+/** System prompt for the image -> prompt direction. */
+export function buildDescribeSystemPrompt(input = {}) {
+  const dialect = findDialect(input.dialect);
+  const aspect = ASPECTS.includes(input.aspect) && input.aspect !== 'auto' ? input.aspect : 'auto';
+  return [
+    DESCRIBE_SYSTEM,
+    '',
+    `TARGET DIALECT — ${dialect.label}: ${dialect.hint}`,
+    aspect === 'auto'
+      ? 'FRAMING — report the aspect ratio you actually observe in `params.aspect_ratio`; do not force 16:9.'
+      : `FRAMING — the user wants a ${aspect} render of this image; report it in params.aspect_ratio.`,
+    input.language === 'zh'
+      ? 'FIELD VALUES — write every field value in Simplified Chinese; keep proper nouns and technical terms in English when Chinese would be ambiguous.'
+      : 'FIELD VALUES — write every field value in English.',
+    input.idea ? `EXTRA CONTEXT FROM THE USER: ${oneLine(input.idea, 600)}` : '',
+    '',
+    'Return the JSON object now.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/** User turn for the image -> prompt direction (the image block is added by the caller). */
+export function buildDescribeUserPrompt(input = {}) {
+  const lines = ['Please reverse-engineer the attached image into a generation prompt.'];
+  if (input.mustAvoid) lines.push('', `MUST AVOID in your description: ${oneLine(input.mustAvoid, 400)}`);
+  return lines.join('\n');
+}
+
+/**
+ * Reverse-engineer one image into the same structured result shape.
+ * @param llm - harness llm service.
+ * @param input - needs `provider`, `model` and `image` (`{ attachment }` block or full content array).
+ * @param signal - caller-owned AbortSignal.
+ */
+export async function runDescribe(llm, input = {}, signal) {
+  if (!oneLine(input.provider, 120) || !oneLine(input.model, 160)) {
+    const error = new Error('请先在工作台顶部选择能看图的对话模型');
+    error.code = 'MODEL_REQUIRED';
+    throw error;
+  }
+  const content = Array.isArray(input.content) ? input.content : null;
+  if (!content || !content.some((part) => part?.type === 'image')) {
+    const error = new Error('请先选一张参考图');
+    error.code = 'IMAGE_REQUIRED';
+    throw error;
+  }
+  const call = await callModel(
+    llm,
+    {
+      provider: input.provider,
+      model: input.model,
+      system: buildDescribeSystemPrompt(input),
+      content,
+      temperature: 0.4,
+      maxTokens: 2800,
+      timeoutMs: input.timeoutMs,
+      label: '反推',
+    },
+    signal,
+  );
+  const parsed = extractJson(call.text);
+  if (!parsed) {
+    const error = new Error('模型没有按 JSON 契约回复，换一个能看图的模型再试');
+    error.code = 'BAD_OUTPUT';
+    error.raw = redact(call.text);
+    throw error;
+  }
+  const result = normalizeResult(parsed, { ...input, idea: input.idea || '(反推自参考图)' });
+  if (!result.prompt) {
+    const error = new Error('模型没能描述出这张图，换一个能看图的模型再试');
+    error.code = 'EMPTY_PROMPT';
+    throw error;
+  }
+  result.elapsedMs = call.elapsedMs;
+  result.provider = call.provider;
+  result.model = call.model;
+  result.source = 'image';
+  return result;
+}
+
+/* ------------------------------------------------------------------ */
+/* prompt -> prompt (one-line delta edit)                              */
+/* ------------------------------------------------------------------ */
+
+const PATCH_SYSTEM_TAIL = [
+  'You are editing an existing image-generation prompt. The user sends one short instruction naming what to change.',
+  '',
+  'HARD RULES',
+  '1. Change ONLY what the instruction names. Every field the instruction does not touch must be copied back verbatim, character for character.',
+  '2. If the instruction names a field, rewrite that field so it satisfies the instruction and still fits the scene.',
+  '3. Never re-invent the subject. If the instruction is ambiguous, pick the reading that changes the least.',
+  '4. No banned filler tokens: masterpiece, best quality, ultra detailed, 8k, award winning, trending on artstation, hyper realistic.',
+  '5. Return exactly ONE JSON object with the SAME shape as the input: no markdown fence, no commentary.',
+  '',
+  'JSON SHAPE',
+  '{',
+  '  "title": "short label, at most 24 characters",',
+  '  "fields": { "subject": "...", "action": "...", "environment": "...", "composition": "...", "lighting": "...", "camera": "...", "style": "...", "palette": "...", "materials": "...", "mood": "...", "details": "..." },',
+  '  "prompt": "the complete rewritten final prompt for the target dialect",',
+  '  "negative": "comma-separated things to avoid",',
+  '  "params": { "aspect_ratio": "16:9", "quality": "high" },',
+  '  "variants": [],',
+  '  "notes": "one short line naming what you changed"',
+  '}',
+].join('\n');
+
+/** System prompt for the one-line delta edit direction. */
+export function buildPatchSystemPrompt(input = {}) {
+  const dialect = findDialect(input.dialect);
+  return [
+    PATCH_SYSTEM_TAIL,
+    '',
+    `TARGET DIALECT — ${dialect.label}: ${dialect.hint}`,
+    input.language === 'zh'
+      ? 'FIELD VALUES — keep the language of the original field values.'
+      : 'FIELD VALUES — keep the language of the original field values.',
+  ].join('\n');
+}
+
+/** User turn carrying the original fields plus the instruction. */
+export function buildPatchUserPrompt(input = {}) {
+  const fields = input.fields && typeof input.fields === 'object' ? input.fields : {};
+  const known = {};
+  for (const key of FIELD_ORDER) {
+    if (typeof fields[key] === 'string' && fields[key].trim()) known[key] = fields[key].trim();
+  }
+  const lines = [
+    'CURRENT FIELDS (verbatim source of truth):',
+    JSON.stringify(known, null, 2),
+    '',
+    'CURRENT FINAL PROMPT:',
+    oneLine(input.prompt, MAX_PROMPT_CHARS) || '(empty)',
+  ];
+  if (input.negative) lines.push('', 'CURRENT NEGATIVE:', oneLine(input.negative, 600));
+  lines.push('', `CHANGE REQUEST: ${oneLine(input.instruction, 600) || '(none)'}`);
+  lines.push('', 'Return the full JSON object now, with untouched fields copied verbatim.');
+  return lines.join('\n');
+}
+
+/**
+ * Apply one short instruction to an existing result.
+ * @param llm - harness llm service.
+ * @param input - `{ provider, model, prompt, fields, negative, instruction, dialect, aspect, language }`.
+ * @param signal - caller-owned AbortSignal.
+ */
+export async function runPatch(llm, input = {}, signal) {
+  const instruction = oneLine(input.instruction, 600);
+  if (!instruction) {
+    const error = new Error('请先写下要改什么，例如「光线换成黄昏」');
+    error.code = 'INSTRUCTION_REQUIRED';
+    throw error;
+  }
+  if (!oneLine(input.prompt, MAX_PROMPT_CHARS) && !input.fields) {
+    const error = new Error('没有可修改的提示词，先优化一版');
+    error.code = 'PROMPT_REQUIRED';
+    throw error;
+  }
+  if (!oneLine(input.provider, 120) || !oneLine(input.model, 160)) {
+    const error = new Error('请先在工作台顶部选择优化用的对话模型');
+    error.code = 'MODEL_REQUIRED';
+    throw error;
+  }
+  const call = await callModel(
+    llm,
+    {
+      provider: input.provider,
+      model: input.model,
+      system: buildPatchSystemPrompt(input),
+      content: [{ type: 'text', text: buildPatchUserPrompt(input) }],
+      temperature: 0.3,
+      maxTokens: 2600,
+      timeoutMs: input.timeoutMs,
+      label: '修改',
+    },
+    signal,
+  );
+  const parsed = extractJson(call.text);
+  if (!parsed) {
+    const error = new Error('模型没有按 JSON 契约回复，可再试一次');
+    error.code = 'BAD_OUTPUT';
+    error.raw = redact(call.text);
+    throw error;
+  }
+  const result = normalizeResult(parsed, { ...input, idea: input.idea || input.prompt || '' });
+  if (!result.prompt) {
+    const error = new Error('模型返回的提示词为空，可再试一次');
+    error.code = 'EMPTY_PROMPT';
+    throw error;
+  }
+  result.elapsedMs = call.elapsedMs;
+  result.provider = call.provider;
+  result.model = call.model;
+  result.source = 'patch';
+  result.instruction = instruction;
+  return result;
+}
+
 export const CATALOG = {
   styles: STYLES,
   dialects: DIALECTS,
@@ -555,3 +830,4 @@ export const CATALOG = {
   fields: FIELD_ORDER.map((key) => ({ key, label: FIELD_LABELS[key] })),
   limits: { idea: MAX_IDEA_CHARS, prompt: MAX_PROMPT_CHARS },
 };
+
