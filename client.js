@@ -316,7 +316,7 @@ window.__ModuleLoader__.load({
 .dpf-grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .dpf-grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
 .dpf-label{display:block;font-size:11px;color:var(--dsw-alias-text-secondary,#86868c);margin-bottom:5px;letter-spacing:.02em}
-.dpf-actions{display:flex;gap:8px;position:sticky;bottom:-20px;padding:10px 0 0;background:linear-gradient(to top,var(--dsw-alias-bg-elevated,#1c1c1e) 62%,transparent)}
+.dpf-actions{display:flex;gap:8px;position:sticky;bottom:0;padding:10px 0 4px;background:linear-gradient(to top,var(--dsw-alias-bg-elevated,#1c1c1e) 62%,transparent)}
 .dpf-btn{border:1px solid var(--dsw-alias-border-default,#ffffff20);border-radius:8px;background:var(--dsw-alias-bg-secondary,#ffffff08);color:inherit;padding:8px 14px;cursor:pointer;font:inherit;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
 .dpf-btn:hover:not(:disabled){background:var(--dsw-alias-bg-hover,#ffffff12)}
 .dpf-btn:disabled{opacity:.42;cursor:default}
