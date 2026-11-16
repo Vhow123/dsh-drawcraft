@@ -19,6 +19,8 @@ window.__ModuleLoader__.load({
     const HOST_STALE = 'HOST_STALE';
     // 本机 dsh-imagegen 插件暴露的设置视图与生图代理接口；没装时都返回 404。
     const IMAGE_CHANNELS_API = '/api/dsh-imagegen/settings/describe';
+    // 按渠道向上游探一次真实可用模型；失败就沿用设置里的模型目录。
+    const IMAGE_MODELS_API = '/api/dsh-imagegen/image-models';
     const GENERATE_API = '/api/dsh-imagegen/generate';
     const IMAGE_MAX_EDGE = 1280;
     const STORE_KEY = 'dsh-image-prompt-forge:v1';
@@ -568,6 +570,7 @@ window.__ModuleLoader__.load({
           const [imageChannelId, setImageChannelId] = useState(typeof stored.imageChannelId === 'string' ? stored.imageChannelId : '');
           const [imageModel, setImageModel] = useState(typeof stored.imageModel === 'string' ? stored.imageModel : '');
           const fileRef = useRef(null);
+          const probeModelsRef = useRef(null);
           const [copied, copy] = useCopy();
 
           const mounted = useRef(true);
@@ -901,6 +904,7 @@ window.__ModuleLoader__.load({
                 setImageChannels(normalized);
                 setImageChannelId(channel.id);
                 setImageModel(channel.models.includes(wanted) ? wanted : channel.models[0]);
+                void probeModelsRef.current(channel.id);
               } catch {
                 /* 没装 imagegen，或当前会话读不到设置：这一块就不显示 */
               }
@@ -914,13 +918,37 @@ window.__ModuleLoader__.load({
           const imageModelOptions = activeChannel ? activeChannel.models : [];
           const effectiveImageModel = imageModelOptions.includes(imageModel) ? imageModel : imageModelOptions[0] ?? '';
 
+          // 设置里的 models 是用户配置的目录，上游未必都认；探一次真实可用列表再校正。
+          const probeModels = async (channelId) => {
+            try {
+              const response = await fetch(IMAGE_MODELS_API, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ channelId }),
+              });
+              if (!response.ok) return;
+              const payload = await response.json().catch(() => null);
+              const models = (Array.isArray(payload?.models) ? payload.models : [])
+                .map((item) => (typeof item === 'string' ? item.trim() : String(item?.id ?? item?.name ?? '').trim()))
+                .filter(Boolean);
+              if (payload?.ok !== true || models.length === 0) return;
+              setImageChannels((prev) => prev.map((item) => (item.id === channelId ? { ...item, models } : item)));
+              setImageModel((current) => (models.includes(current) ? current : models[0]));
+            } catch {
+              /* 探测失败不影响出图，沿用设置里的目录 */
+            }
+          };
+
           const pickImageChannel = (nextId) => {
             const next = imageChannels.find((item) => item.id === nextId);
             const nextModel = next?.models?.[0] ?? '';
             setImageChannelId(nextId);
             setImageModel(nextModel);
             writeStore({ imageChannelId: nextId, imageModel: nextModel });
+            void probeModels(nextId);
           };
+          // 首次挂载的 effect 早于下面这行取值，用 ref 拿最新实现避免闭包取不到。
+          probeModelsRef.current = probeModels;
 
           const pickImageModel = (nextModel) => {
             setImageModel(nextModel);
