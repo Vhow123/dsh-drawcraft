@@ -23,6 +23,9 @@ window.__ModuleLoader__.load({
     const IMAGE_MODELS_API = '/api/dsh-imagegen/image-models';
     const GENERATE_API = '/api/dsh-imagegen/generate';
     const IMAGE_MAX_EDGE = 1280;
+    // 出图尺寸用比例字符串（dsh-imagegen 会按协议换算成像素），清晰度用 1k/2k/4k。
+    const IMAGE_SIZES = ['auto', '1:1', '3:4', '4:3', '9:16', '2:3', '3:2', '16:9', '21:9'];
+    const IMAGE_QUALITIES = ['auto', '1k', '2k', '4k'];
     const STORE_KEY = 'dsh-image-prompt-forge:v1';
     const HISTORY_LIMIT = 24;
 
@@ -170,6 +173,12 @@ window.__ModuleLoader__.load({
       imageChannel: '出图渠道',
       imageModel: '出图模型',
       imageModelHint: '出图用的是本机生图插件里的渠道与模型，和上面的对话模型互不影响',
+      imageSize: '出图尺寸',
+      imageQuality: '出图清晰度',
+      sizeAuto: '跟随画幅',
+      qualityAuto: '渠道默认',
+      zoomHint: '点击放大',
+      save: '保存',
       previewFailed: '出图失败',
       regenerate: '再出一张',
     };
@@ -261,6 +270,12 @@ window.__ModuleLoader__.load({
       imageChannel: 'Image channel',
       imageModel: 'Image model',
       imageModelHint: 'Rendering uses the channel and model configured in the local image plugin; the chat model above is unrelated.',
+      imageSize: 'Size',
+      imageQuality: 'Quality',
+      sizeAuto: 'Follow aspect',
+      qualityAuto: 'Channel default',
+      zoomHint: 'Click to enlarge',
+      save: 'Save',
       previewFailed: 'Render failed',
       regenerate: 'Render another',
     };
@@ -357,6 +372,15 @@ window.__ModuleLoader__.load({
 .dpf-patch-hint{font-size:11px;color:var(--dsw-alias-text-secondary,#7d7d84);margin-top:6px}
 .dpf-preview{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
 .dpf-preview img{max-width:100%;max-height:420px;border-radius:10px;border:1px solid var(--dsw-alias-border-default,#ffffff14);display:block}
+.dpf-shot{position:relative;display:inline-flex;max-width:100%}
+.dpf-shot img{cursor:zoom-in}
+.dpf-shot-save{position:absolute;top:8px;right:8px;padding:4px 10px;border-radius:999px;border:1px solid #ffffff2b;background:#000000b3;color:#fff;font-size:11px;line-height:1.6;cursor:pointer;opacity:0;transition:opacity .15s}
+.dpf-shot:hover .dpf-shot-save,.dpf-shot-save:focus-visible{opacity:1}
+.dpf-lightbox{position:fixed;inset:0;z-index:10100;background:#000000e6;display:flex;align-items:center;justify-content:center;padding:40px 40px 72px;cursor:zoom-out}
+.dpf-lightbox img{max-width:100%;max-height:100%;object-fit:contain;border-radius:10px;box-shadow:0 30px 90px #000c}
+.dpf-lightbox-bar{position:absolute;bottom:22px;left:0;right:0;display:flex;justify-content:center;gap:10px;cursor:default}
+.dpf-lightbox-bar .dpf-btn{background:#ffffff1a;border-color:#ffffff33;color:#fff}
+.dpf-lightbox-bar .dpf-btn:hover{background:#ffffff2b}
 .dpf-preview-empty{font-size:12px;color:var(--dsw-alias-text-secondary,#86868c);padding:10px 0}
 @media(max-width:960px){.dpf-backdrop{padding:0}.dpf-panel{height:100%;border-radius:0}.dpf-body{grid-template-columns:1fr;overflow:auto}.dpf-left{border-right:0;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff10);overflow:visible}.dpf-right{overflow:visible}.dpf-picker{width:100%}}
 `;
@@ -565,6 +589,10 @@ window.__ModuleLoader__.load({
           const [preview, setPreview] = useState([]);
           const [previewError, setPreviewError] = useState('');
           const [generating, setGenerating] = useState(false);
+          // 出图尺寸与清晰度：'auto' 时尺寸跟随结果的画面比例，清晰度交给渠道默认。
+          const [imageSize, setImageSize] = useState(stored.imageSize || 'auto');
+          const [imageQuality, setImageQuality] = useState(stored.imageQuality || 'auto');
+          const [lightbox, setLightbox] = useState(null);
           // 出图渠道/模型：来自本机 dsh-imagegen 的设置视图，没装插件时整块不显示。
           const [imageChannels, setImageChannels] = useState([]);
           const [imageChannelId, setImageChannelId] = useState(typeof stored.imageChannelId === 'string' ? stored.imageChannelId : '');
@@ -602,12 +630,17 @@ window.__ModuleLoader__.load({
             const onKey = (event) => {
               if (event.key === 'Escape') {
                 event.stopPropagation();
+                // 大图开着就先收大图，再按一次才关面板。
+                if (lightbox) {
+                  setLightbox(null);
+                  return;
+                }
                 closePanel();
               }
             };
             window.addEventListener('keydown', onKey, true);
             return () => window.removeEventListener('keydown', onKey, true);
-          }, [onClose]);
+          }, [onClose, lightbox]);
 
           useEffect(() => {
             panelRef.current?.focus?.();
@@ -955,6 +988,32 @@ window.__ModuleLoader__.load({
             writeStore({ imageModel: nextModel });
           };
 
+          const pickImageSize = (nextSize) => {
+            setImageSize(nextSize);
+            writeStore({ imageSize: nextSize });
+          };
+
+          const pickImageQuality = (nextQuality) => {
+            setImageQuality(nextQuality);
+            writeStore({ imageQuality: nextQuality });
+          };
+
+          // 预览图另存为：data URL 直接触发浏览器下载，不经过宿主。
+          const saveShot = (shot, index) => {
+            try {
+              const ext = shot.mime.includes('jpeg') ? 'jpg' : shot.mime.includes('webp') ? 'webp' : 'png';
+              const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+              const link = document.createElement('a');
+              link.href = `data:${shot.mime};base64,${shot.b64}`;
+              link.download = `prompt-forge-${stamp}-${index + 1}.${ext}`;
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+            } catch {
+              /* 下载被拦截时预览仍可右键另存 */
+            }
+          };
+
           const renderOne = useCallback(async () => {
             const prompt = (editedPrompt || result?.prompt || '').trim();
             if (!prompt || generating) return;
@@ -966,7 +1025,13 @@ window.__ModuleLoader__.load({
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({
                   prompt,
-                  size: result?.params?.aspect_ratio && result.params.aspect_ratio !== 'auto' ? result.params.aspect_ratio : 'auto',
+                  size:
+                    imageSize !== 'auto'
+                      ? imageSize
+                      : result?.params?.aspect_ratio && result.params.aspect_ratio !== 'auto'
+                        ? result.params.aspect_ratio
+                        : 'auto',
+                  quality: imageQuality,
                   n: 1,
                   ...(activeChannel ? { channelId: activeChannel.id } : {}),
                   ...(effectiveImageModel ? { model: effectiveImageModel } : {}),
@@ -989,7 +1054,7 @@ window.__ModuleLoader__.load({
             } finally {
               setGenerating(false);
             }
-          }, [editedPrompt, result, generating, t, activeChannel, effectiveImageModel]);
+          }, [editedPrompt, result, generating, t, activeChannel, effectiveImageModel, imageSize, imageQuality]);
 
           const onDropImage = useCallback(
             (event) => {
@@ -1320,6 +1385,43 @@ window.__ModuleLoader__.load({
                           ),
                         ),
                       ),
+                    imageChannels.length > 0 &&
+                      h(
+                        'div',
+                        { className: 'dpf-grid2', style: { marginTop: 8 } },
+                        h(
+                          'div',
+                          null,
+                          h('label', { className: 'dpf-label' }, t('imageSize')),
+                          h(
+                            'select',
+                            {
+                              className: 'dpf-select',
+                              value: imageSize,
+                              onChange: (event) => pickImageSize(event.target.value),
+                            },
+                            IMAGE_SIZES.map((value) =>
+                              h('option', { key: value, value }, value === 'auto' ? t('sizeAuto') : value),
+                            ),
+                          ),
+                        ),
+                        h(
+                          'div',
+                          null,
+                          h('label', { className: 'dpf-label' }, t('imageQuality')),
+                          h(
+                            'select',
+                            {
+                              className: 'dpf-select',
+                              value: imageQuality,
+                              onChange: (event) => pickImageQuality(event.target.value),
+                            },
+                            IMAGE_QUALITIES.map((value) =>
+                              h('option', { key: value, value }, value === 'auto' ? t('qualityAuto') : value.toUpperCase()),
+                            ),
+                          ),
+                        ),
+                      ),
                   ),
                   h(
                     'div',
@@ -1473,7 +1575,27 @@ window.__ModuleLoader__.load({
                         h(
                           'div',
                           { className: 'dpf-preview' },
-                          preview.map((shot, index) => h('img', { key: index, src: `data:${shot.mime};base64,${shot.b64}`, alt: '' })),
+                          preview.map((shot, index) =>
+                            h(
+                              'div',
+                              { className: 'dpf-shot', key: index },
+                              h('img', {
+                                src: `data:${shot.mime};base64,${shot.b64}`,
+                                alt: '',
+                                title: t('zoomHint'),
+                                onClick: () => setLightbox(shot),
+                              }),
+                              h(
+                                'button',
+                                {
+                                  className: 'dpf-shot-save',
+                                  type: 'button',
+                                  onClick: () => saveShot(shot, index),
+                                },
+                                t('save'),
+                              ),
+                            ),
+                          ),
                         ),
                     ),
                   result?.negative &&
@@ -1593,6 +1715,26 @@ window.__ModuleLoader__.load({
                 h('span', null, modelReady ? `${provider} · ${model}` : t('noModel')),
               ),
             ),
+            lightbox &&
+              h(
+                'div',
+                {
+                  className: 'dpf-lightbox',
+                  role: 'dialog',
+                  'aria-modal': 'true',
+                  'aria-label': t('zoomHint'),
+                  onMouseDown: (event) => {
+                    if (event.target === event.currentTarget) setLightbox(null);
+                  },
+                },
+                h('img', { src: `data:${lightbox.mime};base64,${lightbox.b64}`, alt: '', onClick: () => setLightbox(null) }),
+                h(
+                  'div',
+                  { className: 'dpf-lightbox-bar' },
+                  h('button', { className: 'dpf-btn dpf-btn-ghost dpf-btn-small', type: 'button', onClick: () => saveShot(lightbox, 0) }, t('save')),
+                  h('button', { className: 'dpf-btn dpf-btn-ghost dpf-btn-small', type: 'button', onClick: () => setLightbox(null) }, t('close')),
+                ),
+              ),
           );
         }
 
