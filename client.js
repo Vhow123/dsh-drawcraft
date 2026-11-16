@@ -17,7 +17,8 @@ window.__ModuleLoader__.load({
     const NS = 'dsh-image-prompt-forge';
     const API = '/api/prompt-forge';
     const HOST_STALE = 'HOST_STALE';
-    // 本机 dsh-imagegen 插件暴露的生图代理接口；没装时返回 404，面板会给出提示。
+    // 本机 dsh-imagegen 插件暴露的设置视图与生图代理接口；没装时都返回 404。
+    const IMAGE_CHANNELS_API = '/api/dsh-imagegen/settings/describe';
     const GENERATE_API = '/api/dsh-imagegen/generate';
     const IMAGE_MAX_EDGE = 1280;
     const STORE_KEY = 'dsh-image-prompt-forge:v1';
@@ -164,6 +165,9 @@ window.__ModuleLoader__.load({
       previewTitle: '预览图',
       noImagegen: '没找到本机的生图插件（dsh-imagegen），装好后这里就能直接出图',
       hostStale: '宿主还在跑旧版本的插件，退出桌面端重新打开一次就能用了',
+      imageChannel: '出图渠道',
+      imageModel: '出图模型',
+      imageModelHint: '出图用的是本机生图插件里的渠道与模型，和上面的对话模型互不影响',
       previewFailed: '出图失败',
       regenerate: '再出一张',
     };
@@ -252,6 +256,9 @@ window.__ModuleLoader__.load({
       previewTitle: 'Preview',
       noImagegen: 'No local image plugin (dsh-imagegen) found; install it to render from here',
       hostStale: 'The host is still running the previous build of this plugin — quit and reopen the desktop app once.',
+      imageChannel: 'Image channel',
+      imageModel: 'Image model',
+      imageModelHint: 'Rendering uses the channel and model configured in the local image plugin; the chat model above is unrelated.',
       previewFailed: 'Render failed',
       regenerate: 'Render another',
     };
@@ -556,6 +563,10 @@ window.__ModuleLoader__.load({
           const [preview, setPreview] = useState([]);
           const [previewError, setPreviewError] = useState('');
           const [generating, setGenerating] = useState(false);
+          // 出图渠道/模型：来自本机 dsh-imagegen 的设置视图，没装插件时整块不显示。
+          const [imageChannels, setImageChannels] = useState([]);
+          const [imageChannelId, setImageChannelId] = useState(typeof stored.imageChannelId === 'string' ? stored.imageChannelId : '');
+          const [imageModel, setImageModel] = useState(typeof stored.imageModel === 'string' ? stored.imageModel : '');
           const fileRef = useRef(null);
           const [copied, copy] = useCopy();
 
@@ -859,6 +870,63 @@ window.__ModuleLoader__.load({
           }, [result, patching, patchText, modelReady, provider, model, editedPrompt, dialect, aspect, language, t, remember]);
 
           // ── 词 → 图（走本机 dsh-imagegen 的代理接口）─────────────────
+          // 出图渠道与模型：读本机 dsh-imagegen 的设置视图，只取渠道名与模型名。
+          useEffect(() => {
+            let alive = true;
+            (async () => {
+              try {
+                const response = await fetch(IMAGE_CHANNELS_API, {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: '{}',
+                });
+                if (!response.ok) return;
+                const payload = await response.json().catch(() => null);
+                const namespaces = payload?.value?.namespaces;
+                const view = Array.isArray(namespaces) ? namespaces[0]?.value : null;
+                const list = Array.isArray(view?.channels) ? view.channels : [];
+                const normalized = list
+                  .map((channel) => ({
+                    id: String(channel?.id ?? ''),
+                    name: String(channel?.name ?? channel?.label ?? channel?.id ?? ''),
+                    models: (Array.isArray(channel?.models) ? channel.models : [])
+                      .map((entry) => (typeof entry === 'string' ? entry.trim() : String(entry?.id ?? entry?.name ?? '').trim()))
+                      .filter(Boolean),
+                  }))
+                  .filter((channel) => channel.id !== '' && channel.models.length > 0);
+                if (!alive || normalized.length === 0) return;
+                const saved = readStore();
+                const channel = normalized.find((item) => item.id === saved.imageChannelId) ?? normalized[0];
+                const wanted = typeof saved.imageModel === 'string' ? saved.imageModel : '';
+                setImageChannels(normalized);
+                setImageChannelId(channel.id);
+                setImageModel(channel.models.includes(wanted) ? wanted : channel.models[0]);
+              } catch {
+                /* 没装 imagegen，或当前会话读不到设置：这一块就不显示 */
+              }
+            })();
+            return () => {
+              alive = false;
+            };
+          }, []);
+
+          const activeChannel = imageChannels.find((item) => item.id === imageChannelId) ?? imageChannels[0] ?? null;
+          const imageModelOptions = activeChannel ? activeChannel.models : [];
+          const effectiveImageModel = imageModelOptions.includes(imageModel) ? imageModel : imageModelOptions[0] ?? '';
+
+          const pickImageChannel = (nextId) => {
+            const next = imageChannels.find((item) => item.id === nextId);
+            const nextModel = next?.models?.[0] ?? '';
+            setImageChannelId(nextId);
+            setImageModel(nextModel);
+            writeStore({ imageChannelId: nextId, imageModel: nextModel });
+          };
+
+          const pickImageModel = (nextModel) => {
+            setImageModel(nextModel);
+            writeStore({ imageModel: nextModel });
+          };
+
           const renderOne = useCallback(async () => {
             const prompt = (editedPrompt || result?.prompt || '').trim();
             if (!prompt || generating) return;
@@ -872,6 +940,8 @@ window.__ModuleLoader__.load({
                   prompt,
                   size: result?.params?.aspect_ratio && result.params.aspect_ratio !== 'auto' ? result.params.aspect_ratio : 'auto',
                   n: 1,
+                  ...(activeChannel ? { channelId: activeChannel.id } : {}),
+                  ...(effectiveImageModel ? { model: effectiveImageModel } : {}),
                 }),
               });
               const body = await response.json().catch(() => null);
@@ -891,7 +961,7 @@ window.__ModuleLoader__.load({
             } finally {
               setGenerating(false);
             }
-          }, [editedPrompt, result, generating, t]);
+          }, [editedPrompt, result, generating, t, activeChannel, effectiveImageModel]);
 
           const onDropImage = useCallback(
             (event) => {
@@ -1189,6 +1259,39 @@ window.__ModuleLoader__.load({
                         [1, 2, 3].map((value) => h('option', { key: value, value }, String(value))),
                       ),
                     ),
+                    imageChannels.length > 0 &&
+                      h(
+                        'div',
+                        { className: 'dpf-grid2', style: { marginTop: 8 }, title: t('imageModelHint') },
+                        h(
+                          'div',
+                          null,
+                          h('label', { className: 'dpf-label' }, t('imageChannel')),
+                          h(
+                            'select',
+                            {
+                              className: 'dpf-select',
+                              value: activeChannel ? activeChannel.id : '',
+                              onChange: (event) => pickImageChannel(event.target.value),
+                            },
+                            imageChannels.map((item) => h('option', { key: item.id, value: item.id }, item.name)),
+                          ),
+                        ),
+                        h(
+                          'div',
+                          null,
+                          h('label', { className: 'dpf-label' }, t('imageModel')),
+                          h(
+                            'select',
+                            {
+                              className: 'dpf-select',
+                              value: effectiveImageModel,
+                              onChange: (event) => pickImageModel(event.target.value),
+                            },
+                            imageModelOptions.map((item) => h('option', { key: item, value: item }, item)),
+                          ),
+                        ),
+                      ),
                   ),
                   h(
                     'div',

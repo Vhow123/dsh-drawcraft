@@ -134,6 +134,8 @@ check('改一句入口已渲染', clientSource.includes('dpf-patch') && clientSo
 check('试一张走本机 imagegen 代理', clientSource.includes("'/api/dsh-imagegen/generate'"), 'GENERATE_API');
 check('预览图已渲染', clientSource.includes('dpf-preview') && clientSource.includes('shot.b64'), 'dpf-preview');
 check('404 解释为宿主过期', clientSource.includes("HOST_STALE") && typeof zhFlat.hostStale === 'string', zhFlat.hostStale);
+check('出图模型选择器已渲染', clientSource.includes('IMAGE_CHANNELS_API') && clientSource.includes('pickImageModel') && typeof zhFlat.imageModel === 'string', zhFlat.imageModel);
+check('出图请求带渠道与模型', clientSource.includes('channelId: activeChannel.id') && clientSource.includes('model: effectiveImageModel'), 'channelId/model');
 check('三方向路由齐全', ['describe', 'patch', 'optimize'].every((name) => clientSource.includes(`post('${name}'`)), 'post()');
 
 if (fail.length) {
