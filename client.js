@@ -28,6 +28,8 @@ window.__ModuleLoader__.load({
     const IMAGE_QUALITIES = ['auto', '1k', '2k', '4k'];
     const STORE_KEY = 'dsh-image-prompt-forge:v1';
     const HISTORY_LIMIT = 24;
+    // 页脚显示，用来一眼判断浏览器加载的是哪一版 bundle（缓存排查用）。
+    const BUILD = '1.1.3';
 
     // Labels are duplicated from engine.js on purpose: client.js is loaded as a
     // separate bundle and cannot import ESM. The host catalog (fetched on open)
@@ -1712,7 +1714,7 @@ window.__ModuleLoader__.load({
                 'footer',
                 { className: 'dpf-foot' },
                 h('span', null, t('footnote')),
-                h('span', null, modelReady ? `${provider} · ${model}` : t('noModel')),
+                h('span', null, modelReady ? `${provider} · ${model} · v${BUILD}` : `${t('noModel')} · v${BUILD}`),
               ),
             ),
             lightbox &&
