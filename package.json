@@ -26,11 +26,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Vhow123/dsh-prompt-forge.git"
+    "url": "git+https://github.com/Vhow123/dsh-drawcraft.git"
   },
-  "homepage": "https://github.com/Vhow123/dsh-prompt-forge#readme",
+  "homepage": "https://github.com/Vhow123/dsh-drawcraft#readme",
   "bugs": {
-    "url": "https://github.com/Vhow123/dsh-prompt-forge/issues"
+    "url": "https://github.com/Vhow123/dsh-drawcraft/issues"
   },
   "exports": {
     ".": "./index.js",

@@ -4,12 +4,12 @@
 
 ## 安装
 
-**DSH Desktop**：设置 → 插件 → 从 GitHub 安装，粘贴 `https://github.com/Vhow123/dsh-prompt-forge`。
+**DSH Desktop**：设置 → 插件 → 从 GitHub 安装，粘贴 `https://github.com/Vhow123/dsh-drawcraft`。
 
 **命令行**（把 `desktop` 换成你实际的 profile 名）：
 
 ```sh
-dsh plugin --profile desktop add github:Vhow123/dsh-prompt-forge
+dsh plugin --profile desktop add github:Vhow123/dsh-drawcraft
 ```
 
 装完重启宿主。侧边栏中部面板区出现「绘语」；插件页里能看到它的 provider 与 model 组件。
