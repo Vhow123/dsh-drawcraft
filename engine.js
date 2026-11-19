@@ -1,5 +1,5 @@
 /**
- * dsh-image-prompt-forge engine: the pure, testable half of the plugin.
+ * dsh-drawcraft engine: the pure, testable half of the plugin.
  *
  * It owns three things and nothing else:
  *   1. the catalog (styles, dialects, modes, aspect ratios, field layout) that the

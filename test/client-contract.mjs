@@ -76,7 +76,7 @@ const check = (label, ok, detail = '') => {
 };
 
 check('bundle 被注册', Boolean(bundle), bundle ? bundle.id : '未调用 load');
-check('bundle id 正确', bundle?.id === 'dsh-image-prompt-forge', String(bundle?.id));
+check('bundle id 正确', bundle?.id === 'dsh-drawcraft', String(bundle?.id));
 
 const contract = bundle.factory((specifier) => {
   if (specifier === 'react') return React;
@@ -94,23 +94,23 @@ check('不再注册 footer.action', !injections.includes('sidebar.footer.action'
 
 const panelEntry = registrations.find((item) => item.options?.name === 'sidebar.panellist');
 check('panellist 条目存在', Boolean(panelEntry), panelEntry ? String(panelEntry.options.id) : '缺失');
-check('panellist id 用命名空间', panelEntry?.options?.id === 'dsh-image-prompt-forge', String(panelEntry?.options?.id));
+check('panellist id 用命名空间', panelEntry?.options?.id === 'dsh-drawcraft', String(panelEntry?.options?.id));
 check('panellist 有 order', typeof panelEntry?.options?.order === 'number', String(panelEntry?.options?.order));
 check('panellist label 是函数', typeof panelEntry?.options?.label === 'function', typeof panelEntry?.options?.label);
 
 const label = panelEntry?.options?.label?.();
-check('label 命中词典键名', label === 'dsh-image-prompt-forge:meta.title', String(label));
+check('label 命中词典键名', label === 'dsh-drawcraft:meta.title', String(label));
 
 const glyph = panelEntry?.component?.({ size: 18, active: false });
 check('glyph 是 svg', glyph?.type === 'svg', String(glyph?.type));
-check('glyph 带皮肤钩子', glyph?.props?.['data-dsh-panel-entry'] === 'dsh-image-prompt-forge', String(glyph?.props?.['data-dsh-panel-entry']));
+check('glyph 带皮肤钩子', glyph?.props?.['data-dsh-panel-entry'] === 'dsh-drawcraft', String(glyph?.props?.['data-dsh-panel-entry']));
 check('glyph 跟着外壳尺寸', glyph?.props?.width === 18 && glyph?.props?.height === 18, String(glyph?.props?.width));
 
 const mainPage = registrations.find((item) => item.options?.name === 'main');
-check('main 页存在且键匹配', mainPage?.options?.key === 'dsh-image-prompt-forge', String(mainPage?.options?.key));
+check('main 页存在且键匹配', mainPage?.options?.key === 'dsh-drawcraft', String(mainPage?.options?.key));
 
-const zhFlat = dictionaries.find((item) => item.namespace === 'dsh-image-prompt-forge')?.dict?.zh ?? {};
-const enFlat = dictionaries.find((item) => item.namespace === 'dsh-image-prompt-forge')?.dict?.en ?? {};
+const zhFlat = dictionaries.find((item) => item.namespace === 'dsh-drawcraft')?.dict?.zh ?? {};
+const enFlat = dictionaries.find((item) => item.namespace === 'dsh-drawcraft')?.dict?.en ?? {};
 check('中文词典已拍平', typeof zhFlat['meta.title'] === 'string' && zhFlat['meta.title'].length > 0, zhFlat['meta.title']);
 check('英文词典已拍平', typeof enFlat['meta.title'] === 'string' && enFlat['meta.title'].length > 0, enFlat['meta.title']);
 const nested = Object.entries(zhFlat).filter(([, value]) => value && typeof value === 'object').map(([key]) => key);
@@ -185,7 +185,7 @@ check('姿势图条件默认关闭', clientSource.includes('useState(false)') &&
 // 深度图去审核：灰度检测 + 等高线线稿 + 被拒重试
 check('被拒后自动转线稿重试', clientSource.includes('contourDataUrl(primary)') && clientSource.includes("neutralize && primary && !note"), 'neutralize');
 check('不再按灰度预判转线稿', !/neutralize && \(await isFlatGray/.test(clientSource), 'no-preconvert');
-check('主图槽空时把附加参考提成主图', clientSource.includes('if (!primary && gallery.length > 0) primary = gallery.shift()'), 'promote');
+check('主图槽空时把附加参考提成主图', clientSource.includes("imageTab === 'edit' && gallery.length > 0) primary = gallery.shift()"), 'promote');
 check('裸提示词补写实约束', clientSource.includes('PHOTO_NOTE') && clientSource.includes('bare ? PHOTO_NOTE'), 'photo-note');
 check('线稿开关默认开', clientSource.includes('const [neutralize, setNeutralize] = useState(true)'), 'neutralize-state');
 check('被审核拒绝时降级重试一次', clientSource.includes("failure?.code === 'upstream-rejected'"), 'retry');
@@ -193,8 +193,8 @@ check('线稿附带说明前缀', clientSource.includes('CONTOUR_NOTE') && clien
 check('等高线算法可独立调用', clientSource.includes('function buildContourMask('), 'contour-mask');
 
 // 不必先优化就能出图
-check('右侧空态就有出图按钮', clientSource.includes('renderHint') && clientSource.includes('!previewError &&'), 'render-empty');
-check('左栏也有出图按钮', (clientSource.match(/void renderOne\(\)/g) || []).length >= 3, 'render-left');
+check('生图页空态有引导', clientSource.includes("t('imageOutHint')") && clientSource.includes('const previewCard ='), 'image-empty');
+check('生图页有出图按钮', (clientSource.match(/void renderOne\(\)/g) || []).length >= 3, 'render-button');
 check('提示词可退回想法与参考名', clientSource.includes("result?.prompt || idea || fallback"), 'fallback');
 
 // 想法输入框收窄 + 自带生图端点
@@ -203,6 +203,144 @@ check('可自己添加生图模型', clientSource.includes('dpf-target-form') &&
 check('出图请求不带密钥', !/targetId[^}]*apiKey/.test(clientSource), 'no-key-in-render');
 check('出图来源可切换', clientSource.includes('sourceOptions') && clientSource.includes('currentSource'), 'source');
 check('自定义端点走插件转发', clientSource.includes("activeTarget ? `${API}/render` : GENERATE_API"), 'relay');
+
+// 无限画布
+check('画布视图可切换', clientSource.includes("const [page, setPage] = useState('prompt')") && /canvasView\s*\?\s*canvasBody/.test(clientSource), 'canvas-view');
+check('画布状态单独落盘', clientSource.includes('CANVAS_KEY') && clientSource.includes('function writeCanvas('), 'canvas-store');
+check('拖动不逐帧写盘', clientSource.includes('canvasTouched') && clientSource.includes('}, [canvas]);'), 'canvas-debounce');
+check('滚轮是非 passive 监听', clientSource.includes("addEventListener('wheel', onWheel, { passive: false })"), 'canvas-wheel');
+check('节点可拖动与缩放', clientSource.includes('canvasStartDrag') && clientSource.includes(".dpf-canvas-resize"), 'canvas-drag');
+check('空白处拖动平移', clientSource.includes('canvasPanStart') && clientSource.includes('canvasPan.current'), 'canvas-pan');
+check('选中节点再出图', clientSource.includes('canvasGenerate') && clientSource.includes('canvasSel.includes(node.id)'), 'canvas-generate');
+check('出图结果带血缘线', clientSource.includes('canvasEdgePath') && clientSource.includes('edges: ['), 'canvas-edges');
+check('画布支持粘贴与拖入', clientSource.includes("event.clipboardData && event.clipboardData.items") && clientSource.includes('void canvasLoadFile(file)'), 'canvas-paste');
+check('进画布的图会压缩', clientSource.includes('CANVAS_MAX_EDGE') && clientSource.includes('readImageFile(file, CANVAS_MAX_EDGE)'), 'canvas-compress');
+check('节点能送回工坊', clientSource.includes('canvasSendToWorkshop'), 'canvas-to-workshop');
+check('图库缩略图能直接加到画布', clientSource.includes('refToCanvas') && clientSource.includes('dpf-gallery-canvas'), 'canvas-from-gallery');
+
+// 三页结构
+check('顶部有提示词/生图/画布三个页签', clientSource.includes("className: 'dpf-pages'") && clientSource.includes("t('pagePrompt')") && clientSource.includes("t('pageImage')") && clientSource.includes("t('pageCanvas')"), 'pages');
+check('生图页有文生图与图生图两个子页', clientSource.includes("className: 'dpf-side-tab'") && clientSource.includes("setImageTab('text')") && clientSource.includes("setImageTab('edit')"), 'image-tabs');
+check('生图主体区只在图生图子页出现', /imageTab === 'edit' &&\s*h\(/.test(clientSource), 'image-only-edit');
+check('文生图子页忽略手边的主图', clientSource.includes("imageTab === 'edit' ? imageRef.current?.data || '' : ''"), 'text-ignores-subject');
+check('预览卡不在提示词页', clientSource.includes('const previewCard =') && !/dpf-right'[\s\S]{0,4000}dpf-preview/.test(clientSource.split('dpf-right')[1] || ''), 'preview-moved');
+
+// 画布增强：撤销重做、框选、小地图、剪贴板、导入导出、按记录重试
+check('画布有撤销与重做栈', clientSource.includes('CANVAS_HISTORY') && clientSource.includes('const canvasUndo = useCallback') && clientSource.includes('const canvasRedo = useCallback'), 'canvas-undo');
+check('拖动只压一次栈', clientSource.includes('canvasDragBase') && clientSource.includes('canvasRemember(base)'), 'canvas-drag-once');
+check('shift 拖空白框选', clientSource.includes('canvasMarquee.current') && clientSource.includes('event.shiftKey'), 'canvas-marquee');
+check('有小地图', clientSource.includes("className: 'dpf-minimap'") && clientSource.includes('dpf-minimap-box'), 'canvas-minimap');
+check('缩放滑杆与回到 100%', clientSource.includes('dpf-canvas-range') && clientSource.includes('const canvasZoomTo = useCallback'), 'canvas-zoom-to');
+check('支持复制粘贴节点', clientSource.includes('canvasClip') && clientSource.includes('const canvasPaste = useCallback'), 'canvas-clipboard');
+check('支持全选', clientSource.includes('const canvasSelectAll = useCallback') && clientSource.includes("mod && key === 'a'"), 'canvas-select-all');
+check('支持导出与导入画布', clientSource.includes('const canvasExport = useCallback') && clientSource.includes('const canvasImport = useCallback') && clientSource.includes('canvasImportFile'), 'canvas-io');
+check('节点记录生成参数', clientSource.includes('meta: {') && clientSource.includes('withImage: Boolean(primary)'), 'canvas-meta');
+check('可按节点记录再出一张', clientSource.includes('const canvasRetryNode = useCallback') && clientSource.includes("'↻'"), 'canvas-retry');
+check('双击空白复位视图', clientSource.includes('onDoubleClick') && clientSource.includes('canvasZoomTo(1)'), 'canvas-dblclick');
+check('快捷键提示挂到工具栏', clientSource.includes('(Ctrl+Z)') && clientSource.includes('(Ctrl+Shift+Z)'), 'canvas-keys');
+
+// 画布粘贴：Ctrl+V 直接落图，且不跟图生图的主图槽抢
+check('画布页粘贴的图落到画布', clientSource.includes('canvasPasteRef') && clientSource.includes("pageRef.current === 'canvas' && canvasPasteRef.current"), 'canvas-paste-routing');
+check('画布能接图链粘贴', clientSource.includes('const canvasPasteLink = useCallback') && clientSource.includes('text/html'), 'canvas-paste-link');
+check('点画布拿回焦点', clientSource.includes('onPointerDownCapture') && clientSource.includes('canvasRef.current?.focus?.()'), 'canvas-focus');
+check('输入框里的粘贴不抢', clientSource.includes("tag === 'TEXTAREA' || tag === 'INPUT'"), 'canvas-paste-typing');
+check('画布载入图片取的是 data URL 字符串', clientSource.includes('const data = await readImageFile(file, CANVAS_MAX_EDGE)') && !/const shot = await readImageFile/.test(clientSource), 'canvas-load-src');
+check('节点两侧有连线端口', clientSource.includes('const canvasPortDown') && clientSource.includes("'data-side': 'out'") && clientSource.includes('.dpf-canvas-port'), 'canvas-ports');
+check('连线带箭头', clientSource.includes('dpf-canvas-arrow') && clientSource.includes('markerEnd'), 'canvas-edge-arrow');
+check('点线可以删掉', clientSource.includes('const canvasRemoveEdge') && clientSource.includes('dpf-canvas-hit'), 'canvas-edge-remove');
+check('拉线时有预览线', clientSource.includes('canvasLink') && clientSource.includes('dpf-canvas-live'), 'canvas-edge-live');
+check('拉线用捕获阶段，不会被节点拖动抢走', clientSource.includes("window.addEventListener('pointermove', onMove, true)"), 'canvas-port-capture');
+check('拉线预览直接改 DOM，不靠每帧重渲染', clientSource.includes('livePath.current') && clientSource.includes('setAttribute('), 'canvas-port-draw');
+check('点在端口上不会触发画布平移', clientSource.includes("target.closest('.dpf-canvas-port')"), 'canvas-pan-guard');
+check('端口常显，不用悬停才看得见', /\.dpf-canvas-port\{[^}]*opacity:\.9/.test(clientSource), 'canvas-port-visible');
+check('没连上会告诉用户', clientSource.includes('canvasLinkMiss') && clientSource.includes('canvasLinkDone'), 'canvas-link-msg');
+check('松手后清掉预览线，不留幽灵线', clientSource.includes("livePath.current.setAttribute('d', '')"), 'canvas-live-cleanup');
+check('节点上有自己的出图按钮', clientSource.includes('canvasGenerateFrom') && clientSource.includes("'⚡'"), 'canvas-node-generate');
+check(
+  '单个节点出图会沿连线把所有上游都带上',
+  clientSource.includes('const queue = [node.id];') && clientSource.includes('if (edge.to !== at || ids.has(edge.from)) return;'),
+  'canvas-node-upstream',
+);
+check('输入框里按删除键不删节点', clientSource.includes("if (tag === 'TEXTAREA' || tag === 'INPUT') return;") && clientSource.includes('onKeyDown: (event) => event.stopPropagation()'), 'canvas-typing-safe');
+check('没有图时不拿改图指令硬出图', clientSource.includes('canvasNeedSubject') && clientSource.includes('if (!primary && instruction)'), 'canvas-instruction-guard');
+
+// 画布里的参考库：面板内直接搜、按种类筛、点一张就落到画布
+check('画布有自己的一套参考库 state', clientSource.includes('const [canvasGalOpen, setCanvasGalOpen]') && clientSource.includes('const [canvasGalWorks, setCanvasGalWorks]'), 'canvas-gallery-state');
+check('画布有参考库面板', clientSource.includes("className: 'dpf-canvas-gal'") && clientSource.includes('dpf-canvas-gal-grid'), 'canvas-gallery-panel');
+check('参考库检索在工坊与画布之间共用', clientSource.includes('const fetchGallery = useCallback') && clientSource.includes('const searchCanvasGallery = useCallback'), 'canvas-gallery-shared-fetch');
+check('种类筛选条共用同一个渲染函数', clientSource.includes('const renderKindsBox = (st) =>') && clientSource.includes('const canvasKindsBox = renderKindsBox('), 'canvas-gallery-kinds-shared');
+check('画布参考库点一张就落到画布', clientSource.includes('onClick: () => void refToCanvas(work)'), 'canvas-gallery-drop');
+check('工具条有参考库开关', clientSource.includes("t('canvasGallery')"), 'canvas-gallery-button');
+check('参考库面板里滚轮不缩放画布', clientSource.includes("closest('.dpf-canvas-gal')"), 'canvas-gallery-wheel');
+check('参考库能直接喂给选中的节点', clientSource.includes('const applyRefToNode = useCallback') && clientSource.includes("t('canvasApplyNode')"), 'canvas-gallery-apply');
+check('图片节点换图、文字节点追加描述', clientSource.includes("if (target.kind === 'text')") && clientSource.includes("patchCanvasNode(target.id, { text: next })"), 'canvas-gallery-apply-kind');
+check('面板里点按钮不抢画布焦点', clientSource.includes("closest('.dpf-canvas-gal')) return;"), 'canvas-gallery-focus');
+
+check(
+  '主图就是连线上的第一张，不靠猜',
+  clientSource.includes('primaryNode = pinned || ordered[0]') && !clientSource.includes('const humans = triaged.filter'),
+  'canvas-subject-order',
+);
+check(
+  '灰阶图才转姿态卡',
+  clientSource.includes('if (primary && (await imageLooksFlat(primary)))'),
+  'canvas-flat-card',
+);
+check(
+  '附加参考只取版型与姿态，不抄渲染风格',
+  clientSource.includes('CANVAS_REF_NOTE') && clientSource.includes('const refNote = extras.length > 0'),
+  'canvas-ref-note',
+);
+check(
+  '画布出图默认补写实约束',
+  clientSource.includes('CANVAS_REAL_NOTE') && clientSource.includes('CANVAS_REAL_NOTE[language] || CANVAS_REAL_NOTE.en}${words'),
+  'canvas-real-note',
+);
+check(
+  '单色灰图当主图被拒时改发白底姿态卡',
+  clientSource.includes('async function poseCardDataUrl(') && clientSource.includes('await imageLooksFlat(subject)'),
+  'canvas-pose-card',
+);
+check(
+  '可以手动指定哪张图是主体',
+  clientSource.includes('const pinned = ordered.find((node) => node.subject)') &&
+    clientSource.includes("t('canvasSubjectOn')") &&
+    clientSource.includes("node.subject ? '◉' : '◎'"),
+  'canvas-subject-pin',
+);
+check(
+  '附图编号按连线顺序而不是坐标',
+  clientSource.includes('function chainOrder(nodes, edges)') &&
+    clientSource.includes('const ordered = chainOrder(images, state.edges)') &&
+    !clientSource.includes('images.slice().sort((left, right) => left.x - right.x'),
+  'canvas-chain-order',
+);
+check(
+  '出图节点记下主图与参考图的名字',
+  clientSource.includes('primary: primaryNode ? String(primaryNode.title') &&
+    clientSource.includes('extras: extrasNodes.map'),
+  'canvas-meta-names',
+);
+check(
+  '透视面料按不透明还原（画布）',
+  clientSource.includes('const CANVAS_OPAQUE_NOTE = {') &&
+    clientSource.includes('const opaqueNote = extras.length > 0 ? CANVAS_OPAQUE_NOTE[language]') &&
+    clientSource.includes('${refNote}${opaqueNote}'),
+  'canvas-opaque-note',
+);
+check(
+  '被拒后先试不透明面料，再试姿态卡',
+  clientSource.includes('let opaqued = false;') &&
+    clientSource.includes('if (extras.length > 0) {') &&
+    clientSource.includes('shots.opaqued = true;') &&
+    clientSource.includes('const flat = await imageLooksFlat(subject);'),
+  'canvas-opaque-retry',
+);
+check(
+  '工坊图生图也会补一句不透明面料',
+  clientSource.includes('body = await submit(primary, `${note || EDIT_PREFIX[language] || EDIT_PREFIX.en}${CANVAS_OPAQUE_NOTE[language]'),
+  'workshop-opaque-retry',
+);
 
 if (fail.length) {
   console.error(`\n${fail.length} 项未通过：${fail.join('、')}`);

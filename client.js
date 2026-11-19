@@ -1,5 +1,5 @@
 /**
- * dsh-image-prompt-forge browser half.
+ * dsh-drawcraft browser half.
  *
  * A single sidebar-footer launcher that opens a two-column workspace:
  * left = the brief (idea, dialect, style, framing, advanced constraints),
@@ -9,13 +9,13 @@
  * the panel never talks to a provider directly and never sees a key.
  */
 window.__ModuleLoader__.load({
-  id: 'dsh-image-prompt-forge',
+  id: 'dsh-drawcraft',
   factory(require) {
     const React = require('react');
     const ReactDOM = require('react-dom');
 
-    const NS = 'dsh-image-prompt-forge';
-    const API = '/api/prompt-forge';
+    const NS = 'dsh-drawcraft';
+    const API = '/api/drawcraft';
     const HOST_STALE = 'HOST_STALE';
     // 本机 dsh-imagegen 插件暴露的设置视图与生图代理接口；没装时都返回 404。
     const IMAGE_CHANNELS_API = '/api/dsh-imagegen/settings/describe';
@@ -34,10 +34,22 @@ window.__ModuleLoader__.load({
     // 大图缩放范围与步长。
     const MIN_ZOOM = 0.2;
     const MAX_ZOOM = 8;
-    const STORE_KEY = 'dsh-image-prompt-forge:v1';
+    const STORE_KEY = 'dsh-drawcraft:v1';
+    // 改名前的老键：读一次就搬过来，免得用户的选择与历史凭空消失。
+    const LEGACY_STORE_KEY = 'dsh-image-prompt-forge:v1';
     const HISTORY_LIMIT = 24;
+    // 无限画布自己一份存储：图多的时候 JSON 会很大，不能和普通设置挤在同一个键里。
+    const CANVAS_KEY = 'dsh-drawcraft:canvas:v1';
+    const LEGACY_CANVAS_KEY = 'dsh-image-prompt-forge:canvas:v1';
+    // 进画布的图长边压到这个数，一张约 60–120 KB；1280 会让 localStorage 几张就爆。
+    const CANVAS_MAX_EDGE = 768;
+    const CANVAS_LIMIT = 60;
+    const CANVAS_MIN_SCALE = 0.2;
+    const CANVAS_MAX_SCALE = 2.5;
+    // 撤销栈深度。每步存的是整份画布快照，40 步够用又不会把内存撑爆。
+    const CANVAS_HISTORY = 40;
     // 页脚显示，用来一眼判断浏览器加载的是哪一版 bundle（缓存排查用）。
-    const BUILD = '1.3.5';
+    const BUILD = '1.9.7';
 
     // Labels are duplicated from engine.js on purpose: client.js is loaded as a
     // separate bundle and cannot import ESM. The host catalog (fetched on open)
@@ -98,8 +110,8 @@ window.__ModuleLoader__.load({
 
     const zh = {
       meta: {
-        title: '提示词工坊',
-        description: '把模糊的生图想法整理成可直接投喂图像模型的提示词，含字段拆解、负向提示与备选方向。',
+        title: '绘语',
+        description: '把想法拆成可执行的生图提示词，配参考图库（姿势、服装、人像）、图生图与无限画布串联。',
       },
       subtitle: '想法 → 结构 → 可直接执行的提示词',
       brief: '出图意图',
@@ -219,11 +231,86 @@ window.__ModuleLoader__.load({
       targetRemove: '删掉这个',
       targetSaved: '已保存',
       targetNeedUrl: '地址要以 http(s):// 开头，模型名至少填一个',
-      targetHint: '填 OpenAI 兼容的生图接口地址，插件在本机转发，密钥只存在 ~/.dsh/prompt-forge-targets.json。',
+      targetHint: '填 OpenAI 兼容的生图接口地址，插件在本机转发，密钥只存在 ~/.dsh/drawcraft-targets.json。',
       imageSize: '出图尺寸',
       imageQuality: '出图清晰度',
       sizeAuto: '跟随画幅',
       qualityAuto: '渠道默认',
+      canvas: '无限画布',
+      canvasHint: '拖空白处平移，滚轮缩放，拖节点头移动。选中几张图加一个文本框，就能按它们再出一张。',
+      canvasBack: '回到绘语',
+      canvasAddImage: '加图',
+      canvasText: '提示词',
+      canvasImage: '图片',
+      canvasResult: '出图',
+      canvasEmpty: '画布是空的',
+      canvasEmptyHint: '左上角加图或加提示词，也可以直接 Ctrl+V 粘贴。',
+      canvasGenerate: '用选中的出图',
+      canvasPickFirst: '先点中要用的节点（按住 Shift 可多选）',
+      canvasNeedWords: '选中的东西里既没有文字也没有图',
+      canvasWorking: '正在出图…',
+      canvasDone: '出好了',
+      canvasQuota: '图太多，超出浏览器存储上限，这一批只留了排版',
+      canvasFull: '存储写不进去，画布这次的改动没保住',
+      canvasBadImage: '这张图读不出来',
+      canvasFollowImage: '按这张图的样子生成，保持人物与构图',
+      canvasFit: '适配',
+      canvasClear: '清空画布',
+      canvasClearAsk: '清空整个画布？这一步不能撤销。',
+      canvasToWorkshop: '送去绘语',
+      canvasPick: '加到画布',
+      canvasGallery: '参考库',
+      canvasCarded: '已转成姿态卡重试',
+      canvasOpaqued: '已按不透明面料重试',
+      canvasGalleryHint: '点一张就落到画布，拖线接到任意节点',
+      canvasApplyNode: '用到选中的节点',
+      canvasApplied: '已用上',
+      canvasPickOne: '先选中一个节点，再点小角标',
+      canvasPasteLink: '粘贴的图片',
+      canvasOpenImage: '点开看大图，可放大和保存',
+      canvasPortIn: '拖到这里接上一张',
+      canvasGenerateNode: '就用这个节点出图',
+      canvasNeedSubject: '「换成/改成」这类是改图指令，得先有图：把图片节点左边的入口接到这段文字上再点，或者选中图片和文字一起出图。',
+      canvasPortOut: '从这里拖出去连线',
+      canvasSubjectOn: '这张就是主体（再点取消）',
+      canvasSubjectOff: '指定这张当主体：出图会保持它的人和风格',
+      canvasMetaPrimary: '主图',
+      canvasMetaRefs: '参考',
+      canvasLinkDone: '连上了，点这条线可以删掉',
+      canvasLinkMiss: '没落到节点上：把线拖到另一张图或另一段文字的框里面再松手',
+      pagePrompt: '提示词',
+      pageImage: '生图',
+      pageCanvas: '画布',
+      imageTabText: '文生图',
+      imageTabEdit: '图生图',
+      imageSubject: '主体',
+      imageWords: '提示词',
+      imageWordsPlaceholder: '留空就用提示词页那段；写了就按这段出图',
+      imageOutHint: '左边挑文生图或图生图，选好模型和尺寸，点下面的按钮',
+      imageGoHint: '到生图页，用这段提示词或手上的图出图',
+
+      canvasSave: '下载这张',
+      canvasZoom: '缩放',
+      canvasSelected: '已选',
+      canvasTip: '选中节点后按 Delete 删除',
+      canvasUndo: '撤销',
+      canvasRedo: '重做',
+      canvasCopy: '复制选中',
+      canvasPaste: '粘贴',
+      canvasSelectAll: '全选',
+      canvasMarqueeTip: '按住 Shift 拖空白处可以框选',
+      canvasReset: '回到 100%',
+      canvasMinimap: '小地图',
+      canvasExport: '导出',
+      canvasImport: '导入',
+      canvasExportName: 'drawcraft-canvas.json',
+      canvasImportAsk: '导入会替换掉现在整张画布，继续？',
+      canvasImportBad: '这个文件不是画布备份',
+      canvasImportDone: '导入完成',
+      canvasRetry: '按这张的参数再出一张',
+      canvasCopied: '已复制 {n} 个节点',
+      canvasNothing: '没有选中的东西',
+      canvasMeta: '记录',
       zoomHint: '点击放大',
       zoomWheel: '滚轮缩放 · 拖动平移 · 双击复位',
       zoomIn: '放大',
@@ -236,8 +323,8 @@ window.__ModuleLoader__.load({
 
     const en = {
       meta: {
-        title: 'Prompt Forge',
-        description: 'Turn a vague image idea into a prompt a model can execute, with a field-by-field breakdown, negative prompt and alternate directions.',
+        title: 'Drawcraft',
+        description: 'Drawcraft turns a vague image idea into a prompt a model can execute, with reference libraries, image-to-image and an infinite canvas.',
       },
       subtitle: 'idea → structure → an executable prompt',
       brief: 'Brief',
@@ -357,11 +444,86 @@ window.__ModuleLoader__.load({
       targetRemove: 'Remove this',
       targetSaved: 'Saved',
       targetNeedUrl: 'The URL must start with http(s):// and you need at least one model name',
-      targetHint: 'Point it at any OpenAI-compatible image endpoint. The plugin relays the call locally; the key only lives in ~/.dsh/prompt-forge-targets.json.',
+      targetHint: 'Point it at any OpenAI-compatible image endpoint. The plugin relays the call locally; the key only lives in ~/.dsh/drawcraft-targets.json.',
       imageSize: 'Size',
       imageQuality: 'Quality',
       sizeAuto: 'Follow aspect',
       qualityAuto: 'Channel default',
+      canvas: 'Canvas',
+      canvasHint: 'Drag empty space to pan, scroll to zoom, drag a node header to move it. Select a few images plus a text node to render from them.',
+      canvasBack: 'Back to Drawcraft',
+      canvasAddImage: 'Add image',
+      canvasText: 'Prompt',
+      canvasImage: 'Image',
+      canvasResult: 'Render',
+      canvasEmpty: 'The canvas is empty',
+      canvasEmptyHint: 'Add an image or a prompt up top, or just paste with Ctrl+V.',
+      canvasGenerate: 'Render from selection',
+      canvasPickFirst: 'Select the nodes to use first (hold Shift to multi-select)',
+      canvasNeedWords: 'Nothing selected has text or an image',
+      canvasWorking: 'Rendering…',
+      canvasDone: 'Done',
+      canvasQuota: 'Too many images for browser storage — this batch kept only the layout',
+      canvasFull: 'Storage refused the write, this change was not saved',
+      canvasBadImage: 'That image could not be read',
+      canvasFollowImage: 'Render in the style of this image, keeping the subject and framing',
+      canvasFit: 'Fit',
+      canvasClear: 'Clear canvas',
+      canvasClearAsk: 'Clear the whole canvas? This cannot be undone.',
+      canvasToWorkshop: 'Send to Drawcraft',
+      canvasPick: 'Add to canvas',
+      canvasGallery: 'Reference library',
+      canvasCarded: 'retried as a pose card',
+      canvasOpaqued: 'retried with opaque fabric',
+      canvasGalleryHint: 'Click one to drop it on the canvas, then wire it to any node',
+      canvasApplyNode: 'Apply to selected node',
+      canvasApplied: 'Applied',
+      canvasPickOne: 'Select exactly one node first, then click the corner mark',
+      canvasPasteLink: 'Pasted image',
+      canvasOpenImage: 'Click to open it big — zoom and save',
+      canvasPortIn: 'Drop a line here',
+      canvasGenerateNode: 'Render from this node',
+      canvasNeedSubject: 'That reads like an edit instruction. Connect an image node to it first, or select the image and the text together.',
+      canvasPortOut: 'Drag out to connect',
+      canvasSubjectOn: 'This is the subject (click to clear)',
+      canvasSubjectOff: 'Pin this as the subject: the render keeps its person and style',
+      canvasMetaPrimary: 'subject',
+      canvasMetaRefs: 'refs',
+      canvasLinkDone: 'Connected — click the line to remove it',
+      canvasLinkMiss: 'Missed — drop the line inside another node',
+      pagePrompt: 'Prompt',
+      pageImage: 'Image',
+      pageCanvas: 'Canvas',
+      imageTabText: 'text to image',
+      imageTabEdit: 'image to image',
+      imageSubject: 'Subject',
+      imageWords: 'Prompt',
+      imageWordsPlaceholder: 'Leave empty to use the prompt page; type here to render with this instead',
+      imageOutHint: 'Pick text-to-image or image-to-image on the left, choose a model and size, then hit the button',
+      imageGoHint: 'Go to the image page and render from this prompt or the images you have',
+
+      canvasSave: 'Download',
+      canvasZoom: 'Zoom',
+      canvasSelected: 'selected',
+      canvasTip: 'Press Delete to remove selected nodes',
+      canvasUndo: 'Undo',
+      canvasRedo: 'Redo',
+      canvasCopy: 'Copy selection',
+      canvasPaste: 'Paste',
+      canvasSelectAll: 'Select all',
+      canvasMarqueeTip: 'Hold Shift and drag empty space to box-select',
+      canvasReset: 'Back to 100%',
+      canvasMinimap: 'Minimap',
+      canvasExport: 'Export',
+      canvasImport: 'Import',
+      canvasExportName: 'drawcraft-canvas.json',
+      canvasImportAsk: 'Importing replaces the whole canvas. Continue?',
+      canvasImportBad: 'That file is not a canvas backup',
+      canvasImportDone: 'Imported',
+      canvasRetry: 'Render again with this node\'s settings',
+      canvasCopied: 'Copied {n} nodes',
+      canvasNothing: 'Nothing selected',
+      canvasMeta: 'Record',
       zoomHint: 'Click to enlarge',
       zoomWheel: 'Scroll to zoom · drag to pan · double-click to reset',
       zoomIn: 'Zoom in',
@@ -389,6 +551,18 @@ window.__ModuleLoader__.load({
 .dpf-icon:hover{background:var(--dsw-alias-bg-hover,#ffffff10)}
 .dpf-icon:disabled{opacity:.4;cursor:default}
 .dpf-body{flex:1;min-height:0;display:grid;grid-template-columns:392px minmax(0,1fr)}
+.dpf-pages{display:flex;gap:4px;padding:0 20px;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff12);flex-wrap:wrap}
+.dpf-page{position:relative;appearance:none;border:0;background:none;color:var(--dsw-alias-text-secondary,#8b8b93);font:inherit;font-size:13px;font-weight:600;padding:9px 12px;cursor:pointer;border-radius:7px 7px 0 0}
+.dpf-page:hover{color:var(--dsw-alias-text-primary,#dededf);background:#ffffff0a}
+.dpf-page[data-active="1"]{color:var(--dsw-alias-text-primary,#eee)}
+.dpf-page[data-active="1"]::after{content:"";position:absolute;left:8px;right:8px;bottom:-1px;height:2px;border-radius:2px;background:var(--dsw-alias-brand-primary,#5a8dff)}
+.dpf-body-image{grid-template-columns:128px minmax(0,1fr) minmax(280px,.92fr)}
+.dpf-side{display:flex;flex-direction:column;gap:6px;padding:14px 10px;border-right:1px solid var(--dsw-alias-border-default,#ffffff10);min-height:0;overflow:auto}
+.dpf-side-tab{appearance:none;border:1px solid transparent;background:#ffffff0a;color:var(--dsw-alias-text-secondary,#9a9aa2);font:inherit;font-size:12.5px;padding:8px 6px;border-radius:8px;cursor:pointer;text-align:center}
+.dpf-side-tab:hover{color:var(--dsw-alias-text-primary,#dededf);background:#ffffff12}
+.dpf-side-tab[data-active="1"]{background:#ffffff1f;border-color:var(--dsw-alias-border-default,#ffffff26);color:var(--dsw-alias-text-primary,#eee);font-weight:600}
+.dpf-image-main{min-height:0;overflow:auto;padding:16px 18px 20px;border-right:1px solid var(--dsw-alias-border-default,#ffffff10)}
+.dpf-image-out{min-height:0;overflow:auto;padding:16px 18px 20px;display:flex;flex-direction:column;gap:12px}
 .dpf-left{min-height:0;overflow:auto;padding:16px 18px 20px;border-right:1px solid var(--dsw-alias-border-default,#ffffff10)}
 .dpf-right{min-height:0;overflow:auto;padding:16px 20px 20px;display:flex;flex-direction:column;gap:12px}
 .dpf-section{margin-bottom:16px}
@@ -435,6 +609,9 @@ window.__ModuleLoader__.load({
 .dpf-check{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--dsw-alias-text-secondary,#a0a0a6);cursor:pointer}
 .dpf-check input{accent-color:#6b8afd}
 .dpf-gallery-card{position:relative;padding:0;border:1px solid var(--dsw-alias-border-default,#ffffff18);border-radius:8px;background:#00000030;overflow:hidden;cursor:pointer;display:flex;flex-direction:column}
+.dpf-gallery-canvas{position:absolute;top:2px;left:2px;width:17px;height:17px;display:flex;align-items:center;justify-content:center;border-radius:5px;background:#000000b3;color:#fff;font-size:11px;line-height:1;opacity:0;transition:opacity .12s;z-index:2}
+.dpf-gallery-card:hover .dpf-gallery-canvas,.dpf-gallery-canvas:focus-visible{opacity:1}
+.dpf-gallery-canvas:hover{background:var(--dsw-alias-brand-primary,#5a8dff)}
 .dpf-gallery-card img{width:100%;height:96px;object-fit:contain;display:block;background:radial-gradient(circle at 50% 42%,#ffffff12,#00000000 72%)}
 .dpf-gallery-card[data-on]{border-color:var(--dsw-alias-interactive-primary,#c9b6ff);box-shadow:0 0 0 1px var(--dsw-alias-interactive-primary,#c9b6ff) inset}
 .dpf-gallery-name{display:block;font-size:10px;line-height:1.3;padding:3px 4px;color:var(--dsw-alias-text-secondary,#9a9aa0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
@@ -527,7 +704,67 @@ window.__ModuleLoader__.load({
 .dpf-lightbox-bar .dpf-btn{background:#ffffff1a;border-color:#ffffff33;color:#fff}
 .dpf-lightbox-bar .dpf-btn:hover{background:#ffffff2b}
 .dpf-preview-empty{font-size:12px;color:var(--dsw-alias-text-secondary,#86868c);padding:10px 0}
-@media(max-width:960px){.dpf-backdrop{padding:0}.dpf-panel{height:100%;border-radius:0}.dpf-body{grid-template-columns:1fr;overflow:auto}.dpf-left{border-right:0;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff10);overflow:visible}.dpf-right{overflow:visible}.dpf-picker{width:100%}}
+.dpf-canvas{position:relative;flex:1;min-height:0;overflow:hidden;background-color:#131317;background-image:radial-gradient(circle at 1px 1px,#ffffff2b 1.4px,transparent 0);background-size:26px 26px;cursor:grab;touch-action:none}
+.dpf-canvas[data-panning="1"]{cursor:grabbing}
+.dpf-canvas-layer{position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform}
+.dpf-canvas-node{position:absolute;display:flex;flex-direction:column;background:var(--dsw-alias-bg-elevated,#1c1c1e);border:1px solid var(--dsw-alias-border-default,#ffffff1f);border-radius:12px;box-shadow:0 12px 40px #0006;overflow:visible}
+.dpf-canvas-node[data-sel="1"]{border-color:var(--dsw-alias-brand-primary,#5a8dff);box-shadow:0 0 0 1px var(--dsw-alias-brand-primary,#5a8dff),0 12px 40px #0006}
+.dpf-canvas-node[data-kind="text"]{background:var(--dsw-alias-bg-elevated,#1c1c1e)}
+.dpf-canvas-head{display:flex;align-items:center;gap:6px;border-radius:11px 11px 0 0;padding:5px 7px;font-size:11px;color:var(--dsw-alias-text-secondary,#9a9aa2);cursor:move;user-select:none;background:#ffffff08;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff12)}
+.dpf-canvas-head b{font-weight:600;color:var(--dsw-alias-text-primary,#ddd);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.dpf-canvas-x{border:0;background:transparent;color:inherit;font-size:13px;line-height:1;cursor:pointer;padding:0 2px;border-radius:4px}
+.dpf-canvas-x.is-subject{color:#ffd166;text-shadow:0 0 6px #ffd16688}
+.dpf-canvas-x:hover{background:#ffffff1f;color:#fff}
+.dpf-canvas-body{flex:1;min-height:0;position:relative;display:flex;align-items:center;justify-content:center;background:#00000040;border-radius:0 0 11px 11px;overflow:hidden}
+.dpf-canvas-body img{max-width:100%;max-height:100%;object-fit:contain;display:block;cursor:zoom-in;user-select:none}
+.dpf-canvas-body textarea{width:100%;height:100%;border:0;outline:0;resize:none;background:transparent;color:var(--dsw-alias-text-primary,#eee);font:inherit;font-size:12px;line-height:1.6;padding:8px 9px}
+.dpf-canvas-note{position:absolute;left:0;right:0;bottom:0;padding:3px 7px;font-size:10.5px;color:#ffffff8a;background:#000000a6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dpf-canvas-resize{position:absolute;right:0;bottom:0;width:14px;height:14px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 46%,#ffffff40 47%,#ffffff40 60%,transparent 61%)}
+.dpf-canvas-edge{position:absolute;top:0;left:0;overflow:visible;pointer-events:none}
+.dpf-canvas-edge path{fill:none;stroke:#7aa7ff;stroke-width:2.4;stroke-opacity:.75}
+.dpf-canvas-edge path.dpf-canvas-line{stroke-opacity:.85;filter:drop-shadow(0 0 4px #7aa7ff66)}
+.dpf-canvas-edge path.dpf-canvas-hit{fill:none;stroke:transparent;stroke-width:14;pointer-events:stroke;cursor:pointer}
+.dpf-canvas-edge path.dpf-canvas-hit:hover{stroke:#ff6b6b55}
+.dpf-canvas-edge path.dpf-canvas-live{stroke:#ffd166;stroke-width:2.6;stroke-dasharray:6 5;stroke-opacity:1}
+.dpf-canvas-port{position:absolute;width:14px;height:14px;border-radius:50%;background:#7aa7ff;border:2.5px solid #ffffff;box-shadow:0 0 0 1px #7aa7ff,0 2px 6px #000a;opacity:.9;transition:opacity .12s,transform .12s;z-index:4;cursor:crosshair}
+.dpf-canvas-port[data-side="in"]{left:-8px;top:50%;margin-top:-7px}
+.dpf-canvas-port[data-side="out"]{right:-8px;top:50%;margin-top:-7px}
+.dpf-canvas-node:hover .dpf-canvas-port,.dpf-canvas-node[data-sel="1"] .dpf-canvas-port{opacity:1;transform:scale(1.15)}
+.dpf-canvas-port:hover{background:#ffd166;border-color:#fff;transform:scale(1.3)}
+.dpf-canvas-node[data-linkfrom="1"]{box-shadow:0 0 0 2px #ffd166,0 12px 40px #0006}
+.dpf-canvas-tools{position:absolute;top:10px;left:10px;right:10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;z-index:3}
+.dpf-canvas-tools .dpf-btn{background:#000000a6;border-color:#ffffff2b;color:#eee}
+.dpf-canvas-tools .dpf-btn:hover{background:#000000cc}
+.dpf-canvas-tools .dpf-btn-primary{flex:0 0 auto;background:var(--dsw-alias-interactive-primary,#ededf0);color:var(--dsw-alias-text-on-primary,#141416);border-color:transparent}
+.dpf-canvas-tools .dpf-btn-primary:hover{background:#fff}
+.dpf-canvas-msg{position:absolute;bottom:10px;left:10px;right:10px;font-size:11.5px;color:var(--dsw-alias-text-secondary,#9a9aa2);background:#000000a6;border-radius:8px;padding:6px 10px;z-index:3}
+.dpf-canvas-msg[data-bad="1"]{color:var(--dsw-alias-text-warning,#e0b25c)}
+.dpf-canvas-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--dsw-alias-text-secondary,#86868c);font-size:12.5px;text-align:center;pointer-events:none;padding:0 40px}
+.dpf-canvas-badge{position:absolute;top:0;right:0;padding:1px 6px;border-radius:0 11px 0 8px;font-size:10px;background:#000000b3;color:#fff;z-index:2}
+.dpf-canvas-badge[data-busy="1"]{background:var(--dsw-alias-brand-primary,#5a8dff);color:#fff}
+.dpf-canvas-tools .dpf-btn[disabled]{opacity:.38;cursor:default}
+.dpf-canvas-tools .dpf-btn[disabled]:hover{background:#000000a6}
+.dpf-canvas-range{width:82px;height:16px;accent-color:var(--dsw-alias-brand-primary,#5a8dff);cursor:pointer;background:transparent}
+.dpf-canvas-sep{width:1px;height:16px;background:#ffffff26;margin:0 2px}
+.dpf-marquee{position:absolute;border:1px dashed var(--dsw-alias-brand-primary,#5a8dff);background:#5a8dff1f;pointer-events:none;z-index:4;border-radius:2px}
+.dpf-minimap{position:absolute;right:10px;bottom:32px;width:152px;height:98px;border:1px solid #ffffff26;border-radius:8px;background:#000000a6;overflow:hidden;z-index:3;cursor:crosshair}
+.dpf-minimap[data-empty="1"]{display:none}
+.dpf-minimap-node{position:absolute;background:#ffffff3d;border-radius:1px}
+.dpf-minimap-node[data-kind="text"]{background:#e0b25c4d}
+.dpf-minimap-box{position:absolute;border:1px solid var(--dsw-alias-brand-primary,#5a8dff);background:#5a8dff1f;border-radius:2px}
+@media(max-width:960px){.dpf-backdrop{padding:0}.dpf-panel{height:100%;border-radius:0}.dpf-body{grid-template-columns:1fr;overflow:auto}.dpf-left{border-right:0;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff10);overflow:visible}.dpf-right{overflow:visible}.dpf-picker{width:100%}.dpf-body-image{grid-template-columns:1fr}.dpf-side{flex-direction:row;border-right:0;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff10);padding:10px}.dpf-side-tab{flex:1}.dpf-image-main{border-right:0;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff10)}}
+.dpf-canvas-foot{position:absolute;right:10px;bottom:10px;font-size:11px;color:#ffffff66;z-index:3;font-variant-numeric:tabular-nums}
+.dpf-canvas-gal{position:absolute;left:10px;bottom:34px;width:392px;max-height:min(62%,calc(100% - 110px));overflow:auto;z-index:7;padding:10px;border-radius:12px;background:#1b1b20f5;border:1px solid #ffffff26;box-shadow:0 18px 48px #000000a6;backdrop-filter:blur(8px)}
+.dpf-canvas-gal-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.dpf-canvas-gal-head b{font-size:12px;color:#ffffffdd}
+.dpf-canvas-gal .dpf-canvas-x{position:static;margin-left:auto}
+.dpf-canvas-gal .dpf-gallery-grid{max-height:none}
+.dpf-canvas-gal-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:8px}
+.dpf-canvas-gal-grid .dpf-gallery-card{padding:3px}
+.dpf-canvas-gal-grid .dpf-gallery-card img{height:70px;object-fit:contain}
+.dpf-canvas-gal-grid .dpf-gallery-name{font-size:10px;line-height:1.2;max-height:2.4em;overflow:hidden}
+.dpf-canvas-gal-grid .dpf-gallery-canvas{width:16px;height:16px;font-size:10px}
+.dpf-canvas-gal .dpf-gallery-kinds .dpf-kinds-values{max-height:74px}
 `;
 
     // locale 的 translate 是扁平查表（lib/client.js:1433 用 dict[key] 直接取值），
@@ -546,7 +783,7 @@ window.__ModuleLoader__.load({
       apply(ctx) {
         ctx.effect(
           () => ctx.locale.register(NS, { zh: flattenDict(zh), en: flattenDict(en) }),
-          'dsh-image-prompt-forge: dictionaries',
+          'dsh-drawcraft: dictionaries',
         );
 
         const { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } = React;
@@ -662,6 +899,148 @@ window.__ModuleLoader__.load({
           en: 'The attached reference is only a pose sketch: take nothing from it except the silhouette and joint positions. Rebuild the person as a real human photograph, keeping the appearance you were told above. Do not output line art, do not output an illustration.\n\n',
           zh: '附上的参考图只是一张姿态线稿：只从它取轮廓与关节位置，其余一概不管。人物要按上面的描述还原成真人摄影。不要输出线稿，不要输出插画。\n\n',
         };
+
+        /**
+         * 画布上没有「反推」这一步，用户往往只写一句「头发换成双马尾」。
+         * 只发这一句，模型会自己挑风格——它挑的是插画/动漫，出来的就是卡通。
+         * 所以在画布出图时默认补一条写实约束；用户明确要插画时它会被覆盖。
+         */
+        const CANVAS_REAL_NOTE = {
+          en: 'Render as a real photograph: real person, real skin texture, natural light and shadow. Only switch to illustration, anime or cartoon style if the text above explicitly asks for it.\n\n',
+          zh: '按真实摄影呈现：真实人物、真实皮肤质感与自然光影；只有上面明确要求插画、动漫或卡通风格时才换。\n\n',
+        };
+
+        /**
+         * 被上游内容政策拦下来、改发姿态卡时的说明。
+         */
+        const CANVAS_FIX_NOTE = {
+          en: 'The attached picture is a pose card: a plain silhouette on a white background. Read only the body shape and joint positions from it, then render the person described above as a real photograph. Do not copy the card style, do not output line art.\n\n',
+          zh: '附上的是姿态卡：白底上的一个人形轮廓。只从它读身形与关节位置，人物按上面的描述还原成真人摄影。不要照搬卡片风格，不要输出线稿。\n\n',
+        };
+
+        /**
+         * 画布上的「图一/图二/图三」应该按连线数：上游是图一，跟着线往下走。
+         * 按 x 坐标排会在图摆得歪一点时就跟肉眼对不上。
+         * 用最长路径当层级，同层再按坐标兜底，环也能收敛。
+         */
+        function chainOrder(nodes, edges) {
+          const ids = new Set(nodes.map((node) => node.id));
+          const next = new Map();
+          const indeg = new Map(nodes.map((node) => [node.id, 0]));
+          for (const edge of Array.isArray(edges) ? edges : []) {
+            if (!ids.has(edge.from) || !ids.has(edge.to) || edge.from === edge.to) continue;
+            if (!next.has(edge.from)) next.set(edge.from, []);
+            next.get(edge.from).push(edge.to);
+            indeg.set(edge.to, (indeg.get(edge.to) || 0) + 1);
+          }
+          const depth = new Map(nodes.map((node) => [node.id, 0]));
+          let frontier = nodes.filter((node) => (indeg.get(node.id) || 0) === 0).map((node) => node.id);
+          const seen = new Set(frontier);
+          for (let round = 0; round < nodes.length && frontier.length > 0; round += 1) {
+            const ahead = [];
+            for (const id of frontier) {
+              for (const to of next.get(id) || []) {
+                depth.set(to, Math.max(depth.get(to) || 0, (depth.get(id) || 0) + 1));
+                if (!seen.has(to)) {
+                  seen.add(to);
+                  ahead.push(to);
+                }
+              }
+            }
+            frontier = ahead;
+          }
+          return nodes.slice().sort((left, right) => (depth.get(left.id) || 0) - (depth.get(right.id) || 0)
+            || left.x - right.x
+            || left.y - right.y);
+        }
+
+        /**
+         * 提示词里写「图二换服装」，可发出去的图是按主体优先重排的，
+         * 模型看到的第二张根本不是画布上的第二张。这里把编号摊开讲清楚。
+         */
+        function orderNote(entries, primarySlot, lang) {
+          const list = entries.map((item) => `图${item.slot}「${item.title}」`).join('、');
+          if (lang === 'zh') {
+            return `附图编号（按连线顺序，上游在前）：${list}。其中第 ${primarySlot} 张是主体，其余是参考图；下文提到的「图一/图二/图三」都按这个编号理解，不要按实际发送顺序。\n\n`;
+          }
+          return `Attached images, numbered along the wiring order with upstream first: ${list}. Image ${primarySlot} is the subject, the rest are references. Any mention of "image 1 / image 2 / image 3" below refers to this numbering, not to the order they were sent in.\n\n`;
+        }
+
+        /**
+         * 服装库里是 3D 人台，姿势库里是白模/深度图。
+         * 不点明的话，模型会把它们的渲染风格（3D、白模、素模）一起抄过来。
+         */
+        const CANVAS_REF_NOTE = {
+          en: 'The extra reference images only show a garment cut or a body pose: some are 3D mannequin renders or plain grey models. Take only the clothing design and the joint positions from them. Do not copy their skin, material, lighting or rendering style — the result must look like a real photograph.\n\n',
+          zh: '后面的参考图只是版型与姿势的示意图：服装图可能是 3D 人台渲染，姿势图可能是白模或深度图。只取衣服的款式版型与身体姿态，不要复制它们的肤色、材质、光照与渲染风格；最终画面必须是真人实拍。\n\n',
+        };
+
+        /**
+         * 服装库里有一批是「半透明薄纱」面料（例如 SUM-0192 那件黑色透视上衣）。
+         * 参考图里能清楚看到胸部轮廓，模型照抄成透视装，上游网关就直接判裸露拒掉——
+         * 实测同一组参考图：原样发 400 content_policy_violation，加这句就过，版型不变。
+         */
+        const CANVAS_OPAQUE_NOTE = {
+          en: 'Any sheer or see-through garment in the references must be made into an opaque fabric; nothing may show through the neckline or chest.\n\n',
+          zh: '参考图里的透视、薄纱面料一律做成不透明的实拍面料，领口与胸口不得透出皮肤轮廓。\n\n',
+        };
+
+        const CANVAS_CARD_EDGE = 960;
+
+        /**
+         * 判断主图是不是单色灰图（深度图、白模、线稿）。
+         * 这类图当主图会被上游网关判成「淡化处理过的规避图」直接拒。
+         */
+        async function imageLooksFlat(dataUrl) {
+          try {
+            const stats = grayStats(await imagePixels(dataUrl, 384));
+            return stats.saturation < 0.1;
+          } catch (failure) {
+            return false;
+          }
+        }
+
+        /**
+         * 把单色灰图做成「白底姿态卡」：灰阶映射成深蓝线，人物缩到画面 82% 居中，
+         * 四周留白。画面里只剩一个人形，看着是素材图而不是深度图。
+         */
+        async function poseCardDataUrl(dataUrl, maxEdge) {
+          const pixels = await imagePixels(dataUrl, maxEdge || CANVAS_CARD_EDGE);
+          const { context, width, height } = pixels;
+          const frame = context.getImageData(0, 0, width, height);
+          const data = frame.data;
+          const count = width * height;
+          let lo = 1;
+          let hi = 0;
+          for (let i = 0; i < count; i += 1) {
+            const at = i * 4;
+            const value = (0.299 * data[at] + 0.587 * data[at + 1] + 0.114 * data[at + 2]) / 255;
+            if (value < lo) lo = value;
+            if (value > hi) hi = value;
+          }
+          const span = Math.max(0.12, hi - lo);
+          for (let i = 0; i < count; i += 1) {
+            const at = i * 4;
+            const value = (0.299 * data[at] + 0.587 * data[at + 1] + 0.114 * data[at + 2]) / 255;
+            const ratio = Math.max(0, Math.min(1, (value - lo) / span));
+            data[at] = Math.round(246 - ratio * 206);
+            data[at + 1] = Math.round(247 - ratio * 186);
+            data[at + 2] = Math.round(250 - ratio * 130);
+            data[at + 3] = 255;
+          }
+          context.putImageData(frame, 0, 0);
+          const pad = document.createElement('canvas');
+          pad.width = width;
+          pad.height = height;
+          const padCtx = pad.getContext('2d');
+          padCtx.fillStyle = '#ffffff';
+          padCtx.fillRect(0, 0, width, height);
+          const inner = 0.82;
+          const innerW = Math.round(width * inner);
+          const innerH = Math.round(height * inner);
+          padCtx.drawImage(context.canvas, Math.round((width - innerW) / 2), Math.round((height - innerH) / 2), innerW, innerH);
+          return pad.toDataURL('image/png');
+        }
 
         function loadImageElement(dataUrl) {
           return new Promise((resolve, reject) => {
@@ -810,7 +1189,8 @@ window.__ModuleLoader__.load({
 
         function readStore() {
           try {
-            const raw = localStorage.getItem(STORE_KEY);
+            let raw = localStorage.getItem(STORE_KEY);
+            if (!raw) raw = localStorage.getItem(LEGACY_STORE_KEY);
             const value = raw ? JSON.parse(raw) : {};
             return value && typeof value === 'object' ? value : {};
           } catch {
@@ -823,6 +1203,82 @@ window.__ModuleLoader__.load({
             localStorage.setItem(STORE_KEY, JSON.stringify({ ...readStore(), ...patch }));
           } catch {
             /* storage is best-effort */
+          }
+        }
+
+        // 画布状态：节点、血缘边、视口。图多了会撞 localStorage 配额，
+        // 所以超限时退一步——先把图丢掉只留骨架，再不行就整个不存。
+        const EMPTY_CANVAS = { nodes: [], edges: [], view: { x: 0, y: 0, scale: 1 } };
+
+        // 撤销栈是纯数据结构，抽成函数方便单测。push 会清掉 future（新分支），
+        // 超过 CANVAS_HISTORY 就丢最老的一步（否则整张画布的 base64 会把内存吃满）。
+        function histPush(hist, snapshot, limit = CANVAS_HISTORY) {
+          if (!snapshot) return hist;
+          const past = hist.past.concat([snapshot]);
+          if (past.length > limit) past.splice(0, past.length - limit);
+          return { past, future: [] };
+        }
+
+        function histUndo(hist, current) {
+          if (!hist.past || hist.past.length === 0) return null;
+          const target = hist.past[hist.past.length - 1];
+          return {
+            state: target,
+            hist: { past: hist.past.slice(0, -1), future: hist.future.concat([current]) },
+          };
+        }
+
+        function histRedo(hist, current) {
+          if (!hist.future || hist.future.length === 0) return null;
+          const target = hist.future[hist.future.length - 1];
+          return {
+            state: target,
+            hist: { past: hist.past.concat([current]), future: hist.future.slice(0, -1) },
+          };
+        }
+
+        function readCanvas() {
+          try {
+            let raw = localStorage.getItem(CANVAS_KEY);
+            if (!raw) raw = localStorage.getItem(LEGACY_CANVAS_KEY);
+            const value = raw ? JSON.parse(raw) : null;
+            if (!value || typeof value !== 'object') return { ...EMPTY_CANVAS };
+            const view = value.view && typeof value.view === 'object' ? value.view : EMPTY_CANVAS.view;
+            return {
+              nodes: Array.isArray(value.nodes) ? value.nodes.filter((node) => node && typeof node.id === 'string') : [],
+              edges: Array.isArray(value.edges) ? value.edges.filter((edge) => edge && edge.from && edge.to) : [],
+              view: {
+                x: Number(view.x) || 0,
+                y: Number(view.y) || 0,
+                scale: Math.min(CANVAS_MAX_SCALE, Math.max(CANVAS_MIN_SCALE, Number(view.scale) || 1)),
+              },
+            };
+          } catch {
+            return { ...EMPTY_CANVAS };
+          }
+        }
+
+        function writeCanvas(state) {
+          const payload = {
+            nodes: (state.nodes || []).slice(-CANVAS_LIMIT),
+            edges: state.edges || [],
+            view: state.view || EMPTY_CANVAS.view,
+          };
+          try {
+            localStorage.setItem(CANVAS_KEY, JSON.stringify(payload));
+            return '';
+          } catch {
+            // 图太占地方：丢掉像素只留排版，至少别让整张画布消失。
+            try {
+              const slim = {
+                ...payload,
+                nodes: payload.nodes.map((node) => ({ ...node, src: '', lost: Boolean(node.src) })),
+              };
+              localStorage.setItem(CANVAS_KEY, JSON.stringify(slim));
+              return 'quota';
+            } catch {
+              return 'full';
+            }
           }
         }
 
@@ -921,6 +1377,17 @@ window.__ModuleLoader__.load({
           const [refFilters, setRefFilters] = useState({});
           // 哪个维度展开了全部取值（26 类动作、51 种发型默认折叠）。
           const [refKindsOpen, setRefKindsOpen] = useState({});
+          // 画布页自己的参考库：跟工坊互不干扰，关掉再从图库拿也不打架。
+          const [canvasGalOpen, setCanvasGalOpen] = useState(false);
+          const [canvasGalLib, setCanvasGalLib] = useState('auto');
+          const [canvasGalQuery, setCanvasGalQuery] = useState('');
+          const [canvasGalWorks, setCanvasGalWorks] = useState([]);
+          const [canvasGalTotal, setCanvasGalTotal] = useState(0);
+          const [canvasGalLoading, setCanvasGalLoading] = useState(false);
+          const [canvasGalError, setCanvasGalError] = useState('');
+          const [canvasGalKinds, setCanvasGalKinds] = useState({});
+          const [canvasGalFilters, setCanvasGalFilters] = useState({});
+          const [canvasGalOpenDims, setCanvasGalOpenDims] = useState({});
 
           const [result, setResult] = useState(null);
           const [editedPrompt, setEditedPrompt] = useState('');
@@ -972,6 +1439,27 @@ window.__ModuleLoader__.load({
           const [targetMsg, setTargetMsg] = useState('');
           const [targetBad, setTargetBad] = useState(false);
 
+          // ── 三个一级页面 ────────────────────────────────────────────
+          // 提示词只管写字和优化；生图只管图；画布是第三页。
+          const [page, setPage] = useState('prompt');
+          // 生图页里的两个子页：文生图 / 图生图。
+          const [imageTab, setImageTab] = useState('text');
+          const canvasView = page === 'canvas';
+
+          // ── 无限画布 ────────────────────────────────────────────────
+          // 和工坊共用一套出图通道，但排版、选择、血缘都是自己的。
+          const [canvas, setCanvas] = useState(readCanvas);
+          const [canvasSel, setCanvasSel] = useState([]);
+          const [canvasBusy, setCanvasBusy] = useState('');
+          const [canvasMsg, setCanvasMsg] = useState({ text: '', bad: false });
+          const canvasRef = useRef(null);
+          const canvasPan = useRef(null);
+          const canvasGrab = useRef(null);
+          const canvasFile = useRef(null);
+          const canvasImportFile = useRef(null);
+          const canvasState = useRef(canvas);
+          canvasState.current = canvas;
+
           const mounted = useRef(true);
           const runIdRef = useRef('');
           const ideaRef = useRef(null);
@@ -986,6 +1474,12 @@ window.__ModuleLoader__.load({
           const openLightbox = (shot) => {
             setZoom({ scale: 1, x: 0, y: 0 });
             setLightbox(shot);
+          };
+          // 画布上的图存的是 dataURL，预览区里的图是 {mime,b64}。
+          // 统一成 {url} 再交给大图看，省得两套渲染。
+          const openCanvasImage = (node) => {
+            if (!node || !node.src) return;
+            openLightbox({ url: node.src, name: node.title || t('canvasImage') });
           };
           const closeLightbox = () => {
             setLightbox(null);
@@ -1116,39 +1610,76 @@ window.__ModuleLoader__.load({
           // 参考库检索：命中的条目带 CDN 图（姿势库是深度图），点一下进 selected，提交时只发 lib+id。
           // 一页 24 张，底部「加载更多」按 offset 续，总共能翻到多少由服务端的 total 决定。
           const REF_PAGE = 24;
-          const searchRefs = useCallback(async (query, lib, filters, append) => {
-            const at = append ? (Array.isArray(append) ? append.length : 0) : 0;
-            if (!append) setRefWorks([]);
-            setRefLoading(true);
-            setRefError('');
-            try {
-              const payload = await post('gallery', {
-                action: 'search',
-                query: query || '',
-                lib,
-                limit: REF_PAGE,
-                offset: at,
-                filters: filters && Object.keys(filters).length > 0 ? filters : undefined,
-              });
-              if (payload && payload.ok === false) {
-                setRefError(payload.message || t('galleryEmpty'));
+          // 工坊和画布各有一套参考库 state，查法完全一样，只把结果交给调用方去落。
+          const fetchGallery = useCallback(
+            async (query, lib, filters, append) => {
+              const at = append ? (Array.isArray(append) ? append.length : 0) : 0;
+              try {
+                const payload = await post('gallery', {
+                  action: 'search',
+                  query: query || '',
+                  lib,
+                  limit: REF_PAGE,
+                  offset: at,
+                  filters: filters && Object.keys(filters).length > 0 ? filters : undefined,
+                });
+                if (payload && payload.ok === false) {
+                  return { ok: false, message: payload.message || t('galleryEmpty'), works: [], total: 0 };
+                }
+                const works = Array.isArray(payload?.works) ? payload.works : [];
+                return { ok: true, message: '', works, total: Number(payload?.total) || works.length };
+              } catch (failure) {
+                return { ok: false, message: explain(failure), works: [], total: 0 };
+              }
+            },
+            [t],
+          );
+
+          const mergeWorks = (previous, batch, append) => {
+            if (!append) return batch;
+            const seen = new Set(previous.map((item) => `${item.lib}:${item.id}`));
+            return [...previous, ...batch.filter((item) => !seen.has(`${item.lib}:${item.id}`))];
+          };
+
+          const searchRefs = useCallback(
+            async (query, lib, filters, append) => {
+              if (!append) setRefWorks([]);
+              setRefLoading(true);
+              setRefError('');
+              const result = await fetchGallery(query, lib, filters, append);
+              if (!result.ok) {
+                setRefError(result.message);
                 if (!append) setRefWorks([]);
                 setRefTotal(0);
               } else {
-                const batch = Array.isArray(payload?.works) ? payload.works : [];
-                setRefWorks((previous) => {
-                  if (!append) return batch;
-                  const seen = new Set(previous.map((item) => `${item.lib}:${item.id}`));
-                  return [...previous, ...batch.filter((item) => !seen.has(`${item.lib}:${item.id}`))];
-                });
-                setRefTotal(Number(payload?.total) || batch.length);
+                setRefWorks((previous) => mergeWorks(previous, result.works, append));
+                setRefTotal(result.total);
               }
-            } catch (failure) {
-              setRefError(explain(failure));
-            } finally {
               setRefLoading(false);
-            }
-          }, [t]);
+            },
+            [fetchGallery],
+          );
+
+          // 画布里的参考库：同一套检索，结果落到画布自己那一组 state，
+          // 这样面板开着也不会把工坊里已经搜好的列表顶掉。
+          const searchCanvasGallery = useCallback(
+            async (query, lib, filters, append) => {
+              if (!append) setCanvasGalWorks([]);
+              setCanvasGalLoading(true);
+              setCanvasGalError('');
+              const result = await fetchGallery(query, lib, filters, append);
+              if (!result.ok) {
+                setCanvasGalError(result.message);
+                if (!append) setCanvasGalWorks([]);
+                setCanvasGalTotal(0);
+              } else {
+                setCanvasGalWorks((previous) => mergeWorks(previous, result.works, append));
+                setCanvasGalTotal(result.total);
+              }
+              setCanvasGalLoading(false);
+            },
+            [fetchGallery],
+          );
 
           // 拉某个库的种类清单（体系/角度/分类 之类）。服务端有内存缓存，切回来也不重复读盘。
           const loadKinds = useCallback(async (lib) => {
@@ -1190,19 +1721,53 @@ window.__ModuleLoader__.load({
             });
           }, []);
 
+          const loadCanvasKinds = useCallback(async (lib) => {
+            if (!lib || lib === 'auto') return;
+            try {
+              const payload = await post('gallery', { action: 'kinds', lib });
+              if (payload?.kinds?.[lib]) {
+                setCanvasGalKinds((previous) => ({ ...previous, [lib]: payload.kinds[lib] }));
+              }
+            } catch {
+              // 拉不到种类不影响搜索
+            }
+          }, []);
+
+          const applyCanvasFilter = useCallback(
+            (key, value) => {
+              const next = { ...canvasGalFilters, [key]: value };
+              setCanvasGalFilters(next);
+              if (canvasGalLib !== 'auto') void searchCanvasGallery(canvasGalQuery, canvasGalLib, next);
+            },
+            [canvasGalFilters, canvasGalLib, canvasGalQuery, searchCanvasGallery],
+          );
+
+          const switchCanvasLib = useCallback(
+            (key) => {
+              setCanvasGalLib(key);
+              setCanvasGalFilters({});
+              setCanvasGalOpenDims({});
+              if (key !== 'auto') void loadCanvasKinds(key);
+              void searchCanvasGallery(canvasGalQuery, key, {});
+            },
+            [loadCanvasKinds, canvasGalQuery, searchCanvasGallery],
+          );
+
           // 参考库面板：搜索 → 缩略图网格 → 选中的条目挂在输入框下面。
           // 种类维度只在选定单个库时出现（auto 混三库没有统一维度）。
           // 全部用胶囊按钮而不是原生 select：原生下拉的选项列表由系统绘制，
           // 深色主题下会变成白底浅字，改 CSS 也压不住。
-          const kindDims = refLib === 'auto' ? [] : refKinds[refLib] || [];
-          const kindsPending = refLib !== 'auto' && !refKinds[refLib];
-          const kindsBox = kindDims.length > 0
+          // 种类筛选条：工坊和画布共用一套渲染，只把各自的 state 传进来。
+          const renderKindsBox = (st) => {
+          const kindDims = st.lib === 'auto' ? [] : st.kinds[st.lib] || [];
+          const kindsPending = st.lib !== 'auto' && !st.kinds[st.lib];
+          return kindDims.length > 0
             ? h(
                 'div',
                 { className: 'dpf-gallery-kinds' },
                 kindDims.map((dim) => {
-                  const active = refFilters[dim.key] || '';
-                  const open = refKindsOpen[dim.key] === true;
+                  const active = st.filters[dim.key] || '';
+                  const open = st.open[dim.key] === true;
                   const CHIP_LIMIT = 8;
                   // 选中的那个永远排在最前，折叠时也不会被藏起来。
                   const ordered = active
@@ -1223,7 +1788,7 @@ window.__ModuleLoader__.load({
                           type: 'button',
                           className: 'dpf-chip',
                           'data-on': active ? undefined : '1',
-                          onClick: () => applyFilter(dim.key, ''),
+                          onClick: () => st.apply(dim.key, ''),
                         },
                         `${t('galleryAny')} ${dim.values.reduce((sum, item) => sum + item.count, 0)}`,
                       ),
@@ -1235,7 +1800,7 @@ window.__ModuleLoader__.load({
                             type: 'button',
                             className: 'dpf-chip',
                             'data-on': active === item.value ? '1' : undefined,
-                            onClick: () => applyFilter(dim.key, item.value),
+                            onClick: () => st.apply(dim.key, item.value),
                           },
                           `${item.value} ${item.count}`,
                         ),
@@ -1247,7 +1812,7 @@ window.__ModuleLoader__.load({
                             type: 'button',
                             className: 'dpf-chip dpf-chip-more',
                             onClick: () =>
-                              setRefKindsOpen((previous) => ({ ...previous, [dim.key]: !open })),
+                              st.setOpen((previous) => ({ ...previous, [dim.key]: !open })),
                           },
                           open ? t('kindsLess') : `+${rest} ${t('kindsMore')}`,
                         ),
@@ -1256,6 +1821,25 @@ window.__ModuleLoader__.load({
                 }),
               )
             : null;
+          };
+
+          const kindsBox = renderKindsBox({
+            lib: refLib,
+            kinds: refKinds,
+            filters: refFilters,
+            open: refKindsOpen,
+            setOpen: setRefKindsOpen,
+            apply: applyFilter,
+          });
+          const canvasKindsBox = renderKindsBox({
+            lib: canvasGalLib,
+            kinds: canvasGalKinds,
+            filters: canvasGalFilters,
+            open: canvasGalOpenDims,
+            setOpen: setCanvasGalOpenDims,
+            apply: applyCanvasFilter,
+          });
+
           const galleryBox = h(
             'div',
             { className: 'dpf-gallery' },
@@ -1310,7 +1894,7 @@ window.__ModuleLoader__.load({
                 ),
               ),
             ),
-            kindsPending && h('div', { className: 'dpf-gallery-note' }, `${t('galleryKinds')}…`),
+            refLib !== 'auto' && !refKinds[refLib] && h('div', { className: 'dpf-gallery-note' }, `${t('galleryKinds')}…`),
             kindsBox,
             refError && h('div', { className: 'dpf-gallery-note dpf-warn' }, refError),
             refWorks.length > 0 &&
@@ -1330,6 +1914,19 @@ window.__ModuleLoader__.load({
                     },
                     h('img', { src: work.thumbUrl, alt: '', loading: 'lazy' }),
                     h('span', { className: 'dpf-gallery-name' }, work.name),
+                    h(
+                      'span',
+                      {
+                        className: 'dpf-gallery-canvas',
+                        role: 'button',
+                        title: t('canvasPick'),
+                        onClick: (event) => {
+                          event.stopPropagation();
+                          void refToCanvas(work);
+                        },
+                      },
+                      '⇱',
+                    ),
                   ),
                 ),
               ),
@@ -1589,17 +2186,41 @@ window.__ModuleLoader__.load({
           }, [image]);
 
           // 面板打开时，直接 Ctrl+V 就能把剪贴板里的图塞进来——这是最顺手的一条路。
+          // 画布页要另一套处理：图应该落到画布上，而不是跑进图生图的主图槽。
+          const pageRef = useRef(page);
+          pageRef.current = page;
+          const canvasPasteRef = useRef(null);
           useEffect(() => {
             const onPaste = (event) => {
               const items = event.clipboardData?.items;
               if (!items) return;
+              // 光标在输入框里（画布文本节点、提示词框）就让人家正常粘字，不抢。
+              const tag = event.target && event.target.tagName;
+              const typing = tag === 'TEXTAREA' || tag === 'INPUT';
               for (const item of items) {
                 if (item.kind !== 'file' || !String(item.type || '').startsWith('image/')) continue;
                 const file = item.getAsFile();
                 if (!file) continue;
                 event.preventDefault();
-                void loadShot(file);
+                if (pageRef.current === 'canvas' && canvasPasteRef.current) canvasPasteRef.current(file);
+                else void loadShot(file);
                 return;
+              }
+              // 剪贴板里没有文件：有些应用（网页、Word、QQ）复制图片时只给 HTML 或纯文本链接。
+              if (pageRef.current === 'canvas' && canvasPasteRef.current) {
+                const html = String(event.clipboardData?.getData('text/html') || '');
+                const text = String(event.clipboardData?.getData('text/plain') || '').trim();
+                const fromHtml = (html.match(/<img[^>]+src\s*=\s*["']([^"']+)["']/i) || [])[1] || '';
+                const fromText = /^data:image\//i.test(text) || /^https?:\/\/\S+\.(png|jpe?g|webp|gif)(\?\S*)?$/i.test(text) ? text : '';
+                const url = fromHtml || fromText;
+                if (url) {
+                  event.preventDefault();
+                  canvasPasteRef.current(null, url);
+                  return;
+                }
+                // 没图也没链接：按 Ctrl+V 复制节点那条路走。
+                // 但正在输入框里打字时不抢，否则正常粘文本也会被吃掉。
+                if (!typing) canvasPasteRef.current(null);
               }
             };
             window.addEventListener('paste', onPaste);
@@ -1867,11 +2488,15 @@ window.__ModuleLoader__.load({
           // 预览图另存为：data URL 直接触发浏览器下载，不经过宿主。
           const saveShot = (shot, index) => {
             try {
-              const ext = shot.mime.includes('jpeg') ? 'jpg' : shot.mime.includes('webp') ? 'webp' : 'png';
+              const href = shot.url || `data:${shot.mime};base64,${shot.b64}`;
+              const guess = String(shot.url || '').slice(0, 24);
+              const ext = shot.mime
+                ? shot.mime.includes('jpeg') ? 'jpg' : shot.mime.includes('webp') ? 'webp' : 'png'
+                : guess.includes('image/webp') ? 'webp' : guess.includes('image/jpeg') ? 'jpg' : 'png';
               const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
               const link = document.createElement('a');
-              link.href = `data:${shot.mime};base64,${shot.b64}`;
-              link.download = `prompt-forge-${stamp}-${index + 1}.${ext}`;
+              link.href = href;
+              link.download = `drawcraft-${stamp}-${index + 1}.${ext}`;
               document.body.appendChild(link);
               link.click();
               document.body.removeChild(link);
@@ -1899,8 +2524,8 @@ window.__ModuleLoader__.load({
             setPreviewError('');
             try {
               // 图生图：导入的主图作为 image，附加参考与姿势图作为 images（上限四张）。
-              const gallery = refShots.map((shot) => shot?.data).filter(Boolean).slice(0, 4);
-              if (usePoseRefs && refs.length > 0 && gallery.length < 4) {
+              const gallery = imageTab === 'edit' ? refShots.map((shot) => shot?.data).filter(Boolean).slice(0, 4) : [];
+              if (usePoseRefs && imageTab === 'edit' && refs.length > 0 && gallery.length < 4) {
                 for (const item of refs) {
                   if (gallery.length >= 4) break;
                   if (!item?.imageUrl) continue;
@@ -1908,10 +2533,10 @@ window.__ModuleLoader__.load({
                   if (data) gallery.push(data);
                 }
               }
-              let primary = imageRef.current?.data || '';
+              let primary = imageTab === 'edit' ? imageRef.current?.data || '' : '';
               // 主图槽空着、附加位里却有图时，把第一张提成主图。
               // 不然请求会退化成纯文生图，模型只看到一句「坐姿・抱腿打开」就自由发挥成动漫了。
-              if (!primary && gallery.length > 0) primary = gallery.shift();
+              if (!primary && imageTab === 'edit' && gallery.length > 0) primary = gallery.shift();
               let note = '';
               // 没写想法、也没优化过时，只拿参考名当提示词太单薄，补一句写实约束。
               const bare = !editedPrompt.trim() && !(result && result.prompt) && !idea.trim();
@@ -1959,12 +2584,24 @@ window.__ModuleLoader__.load({
               try {
                 body = await submit(primary, note);
               } catch (failure) {
-                // 主图被审核拦下来时，改投一张等高线线稿重试一次。
-                if (neutralize && primary && !note && failure?.code === 'upstream-rejected') {
-                  const line = await contourDataUrl(primary);
-                  const head = `${EDIT_PREFIX[language] || EDIT_PREFIX.en}${SKETCH_NOTE[language] || SKETCH_NOTE.en}${PHOTO_NOTE[language] || PHOTO_NOTE.en}`;
-                  body = await submit(line, head);
-                  if (bare) setNotice(t('sketchNeedsWords'));
+                if (failure && failure.code === 'upstream-rejected') {
+                  // 第一层：参考图里有透视/薄纱服装时，模型照抄会判裸露。
+                  // 补一句「做成不透明面料」重发，版型不变。
+                  if (gallery.length > 0) {
+                    try {
+                      body = await submit(primary, `${note || EDIT_PREFIX[language] || EDIT_PREFIX.en}${CANVAS_OPAQUE_NOTE[language] || CANVAS_OPAQUE_NOTE.en}`);
+                    } catch (ignored) {
+                      body = null;
+                    }
+                  }
+                  // 第二层：主图被审核拦下来时，改投一张等高线线稿重试一次。
+                  if (!body && neutralize && primary && !note) {
+                    const line = await contourDataUrl(primary);
+                    const head = `${EDIT_PREFIX[language] || EDIT_PREFIX.en}${SKETCH_NOTE[language] || SKETCH_NOTE.en}${PHOTO_NOTE[language] || PHOTO_NOTE.en}`;
+                    body = await submit(line, head);
+                    if (bare) setNotice(t('sketchNeedsWords'));
+                  }
+                  if (!body) throw failure;
                 } else {
                   throw failure;
                 }
@@ -1975,6 +2612,8 @@ window.__ModuleLoader__.load({
               if (shots.length === 0) throw new Error(t('previewFailed'));
               setPreview(shots);
               setPreviewStale(false);
+              // 结果在生图页，出完直接把人带过去。
+              setPage('image');
             } catch (failure) {
               const message = failure?.message || String(failure);
               const rejected = failure?.code === 'upstream-rejected';
@@ -1982,10 +2621,760 @@ window.__ModuleLoader__.load({
               setPreviewError(rejected ? `${friendly}\n\n${t('rejectedHint')}` : friendly);
               // 旧图还在窗口里，不标一下会被当成这次出的。
               setPreviewStale(true);
+              setPage('image');
             } finally {
               setGenerating(false);
             }
-          }, [editedPrompt, result, generating, t, activeChannel, activeTarget, effectiveImageModel, imageSize, imageQuality, refShots, usePoseRefs, neutralize, refs, idea, language]);
+          }, [editedPrompt, result, generating, t, activeChannel, activeTarget, effectiveImageModel, imageSize, imageQuality, refShots, usePoseRefs, neutralize, refs, idea, language, imageTab]);
+
+          // 一次生图请求。工坊的 renderOne 里那段逻辑原本是内联的，
+          // 画布也要用同一套通道，所以抽成独立入口，renderOne 保持原样不动。
+          const requestImage = useCallback(
+            async ({ prompt, primary = '', extras = [], size = '', quality = '', retry = true }) => {
+              const subject = primary || '';
+              const shared = {
+                mode: subject ? 'edit' : 'text',
+                prompt,
+                size: size || imageSize,
+                quality: quality || imageQuality,
+                n: 1,
+                ...(subject ? { image: subject } : {}),
+                ...(extras.length > 0 ? { images: extras.slice(0, 4) } : {}),
+                ...(effectiveImageModel ? { model: effectiveImageModel } : {}),
+              };
+              const endpoint = activeTarget ? `${API}/render` : GENERATE_API;
+              const payload = activeTarget
+                ? { ...shared, targetId: activeTarget.id }
+                : { ...shared, ...(activeChannel ? { channelId: activeChannel.id } : {}) };
+              const send = async (outgoing) => {
+                const response = await fetch(endpoint, {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify(outgoing),
+                });
+                const body = await response.json().catch(() => null);
+                if (!response.ok) {
+                  if (response.status === 404) throw new Error(t('noImagegen'));
+                  const rejected = new Error((body && body.message) || `HTTP ${response.status}`);
+                  rejected.code = (body && body.code) || '';
+                  throw rejected;
+                }
+                if (!body || body.ok === false) {
+                  const rejected = new Error((body && body.message) || t('previewFailed'));
+                  rejected.code = (body && body.code) || '';
+                  throw rejected;
+                }
+                return body;
+              };
+              let body = null;
+              let carded = false;
+              let opaqued = false;
+              try {
+                body = await send(payload);
+              } catch (failure) {
+                if (!(retry && subject && failure && failure.code === 'upstream-rejected')) throw failure;
+                // 第一层：参考图里有透视/薄纱面料时，模型照抄会被判裸露。
+                // 补一句「做成不透明面料」重发，版型不变，实测能过。
+                if (extras.length > 0) {
+                  try {
+                    body = await send({
+                      ...payload,
+                      prompt: `${CANVAS_OPAQUE_NOTE[language] || CANVAS_OPAQUE_NOTE.en}${prompt}`,
+                    });
+                    opaqued = true;
+                  } catch (ignored) {
+                    body = null;
+                  }
+                }
+                // 第二层：单色灰图（深度图/白模/线稿）当主图会被判成规避图，改成白底姿态卡再试。
+                // 真人照片被拒是因为内容，不是「淡化」，转卡也没用，直接抛回去。
+                if (!body) {
+                  const flat = await imageLooksFlat(subject);
+                  if (!flat) throw failure;
+                  try {
+                    const card = await poseCardDataUrl(subject);
+                    body = await send({
+                      ...payload,
+                      image: card,
+                      prompt: `${CANVAS_FIX_NOTE[language] || CANVAS_FIX_NOTE.en}${prompt}`,
+                    });
+                    carded = true;
+                  } catch (again) {
+                    throw failure;
+                  }
+                }
+              }
+              const shots = (Array.isArray(body.images) ? body.images : [])
+                .filter((item) => item && typeof item.b64 === 'string' && item.b64)
+                .map((item) => ({ b64: item.b64, mime: item.mime || 'image/png' }));
+              if (shots.length === 0) throw new Error(t('previewFailed'));
+              if (carded) shots.carded = true;
+              if (opaqued) shots.opaqued = true;
+              return shots;
+            },
+            [activeTarget, activeChannel, effectiveImageModel, imageSize, imageQuality, language, t],
+          );
+
+          // ── 画布：状态提交、节点增删、平移缩放、出图 ──────────────
+          // 拖动时每帧都会改状态，落盘交给下面的 debounce effect，这里只更新内存。
+          //
+          // 撤销栈：每步存整份快照（节点带 dataURL，所以栈深限 40）。拖动这种连续
+          // 操作走 silent 提交，只在抬手时把起点快照压栈，否则拖一次就吃掉几十步。
+          const canvasHist = useRef({ past: [], future: [] });
+          const canvasHistSig = useRef(0);
+          const [canvasDepth, setCanvasDepth] = useState({ undo: 0, redo: 0 });
+          const canvasClip = useRef([]);
+          const canvasDragBase = useRef(null);
+          const canvasMarquee = useRef(null);
+          const [canvasBox, setCanvasBox] = useState(null);
+          const [canvasLink, setCanvasLink] = useState(null);
+          const [linkFrom, setLinkFrom] = useState('');
+          const livePath = useRef(null);
+          useEffect(() => {
+            // DOM 里的 d 是手写的，React 不负责回收；这里兜一层，
+            // 免得任何一次重渲染后留下一条幽灵预览线。
+            if (!canvasLink && livePath.current && livePath.current.getAttribute('d')) {
+              livePath.current.setAttribute('d', '');
+            }
+          }, [canvasLink, canvas.nodes.length]);
+
+          const canvasStore = useCallback((next) => {
+            canvasState.current = next;
+            setCanvas(next);
+          }, []);
+
+          // 只把一份快照记进撤销栈（给拖动、缩放这类事先算好结果的操作复用）。
+          const canvasRemember = useCallback((snapshot) => {
+            if (!snapshot) return;
+            const hist = canvasHist.current;
+            const next = histPush(hist, snapshot, CANVAS_HISTORY);
+            canvasHist.current = next;
+            canvasHistSig.current += 1;
+            setCanvasDepth({ undo: next.past.length, redo: next.future.length });
+          }, []);
+
+          const commitCanvas = useCallback(
+            (updater, options) => {
+              const prev = canvasState.current;
+              const next = typeof updater === 'function' ? updater(prev) : updater;
+              if (!next || next === prev) return;
+              if (!(options && options.silent)) canvasRemember(prev);
+              canvasState.current = next;
+              setCanvas(next);
+            },
+            [canvasRemember],
+          );
+
+          const canvasUndo = useCallback(() => {
+            const result = histUndo(canvasHist.current, canvasState.current);
+            if (!result) return;
+            canvasHist.current = result.hist;
+            canvasState.current = result.state;
+            setCanvas(result.state);
+            setCanvasSel([]);
+            setCanvasDepth({ undo: result.hist.past.length, redo: result.hist.future.length });
+          }, []);
+
+          const canvasRedo = useCallback(() => {
+            const result = histRedo(canvasHist.current, canvasState.current);
+            if (!result) return;
+            canvasHist.current = result.hist;
+            canvasState.current = result.state;
+            setCanvas(result.state);
+            setCanvasSel([]);
+            setCanvasDepth({ undo: result.hist.past.length, redo: result.hist.future.length });
+          }, []);
+
+          const canvasNodeId = () => `cn_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+          // 落盘做 400ms 防抖：拖节点、缩放时不该每次都写 localStorage。
+          const canvasTouched = useRef(false);
+          useEffect(() => {
+            if (!canvasTouched.current) {
+              canvasTouched.current = true;
+              return undefined;
+            }
+            const timer = setTimeout(() => {
+              const warn = writeCanvas(canvasState.current);
+              if (warn === 'quota') setCanvasMsg({ text: t('canvasQuota'), bad: true });
+              else if (warn === 'full') setCanvasMsg({ text: t('canvasFull'), bad: true });
+            }, 400);
+            return () => clearTimeout(timer);
+            // t 每次渲染都是新的 bind 结果，放进依赖会让这个定时器被反复重置。
+          }, [canvas]);
+
+          // React 的 onWheel 是 passive 监听，preventDefault 会被忽略，只能自己挂。
+          useEffect(() => {
+            const el = canvasRef.current;
+            if (!el || !canvasView) return undefined;
+            const onWheel = (event) => {
+              // 参考库面板里的滚动归面板自己，别顺手把画布缩了。
+              // React 的 onWheel 挂在根节点上，拦不住这里直接挂在 canvas 上的原生监听。
+              if (event.target && event.target.closest && event.target.closest('.dpf-canvas-gal')) return;
+              event.preventDefault();
+              const rect = el.getBoundingClientRect();
+              const px = event.clientX - rect.left;
+              const py = event.clientY - rect.top;
+              const view = canvasState.current.view;
+              const factor = Math.exp(-event.deltaY * 0.0016);
+              const scale = Math.min(CANVAS_MAX_SCALE, Math.max(CANVAS_MIN_SCALE, view.scale * factor));
+              if (scale === view.scale) return;
+              const ratio = scale / view.scale;
+              commitCanvas((prev) => ({
+                ...prev,
+                view: { scale, x: px - (px - view.x) * ratio, y: py - (py - view.y) * ratio },
+              }));
+            };
+            el.addEventListener('wheel', onWheel, { passive: false });
+            return () => el.removeEventListener('wheel', onWheel);
+          }, [canvasView, commitCanvas]);
+
+          // 视口中心换算成世界坐标，新节点落在看得见的地方。
+          const canvasCenter = useCallback(() => {
+            const el = canvasRef.current;
+            const width = el && el.clientWidth ? el.clientWidth : 820;
+            const height = el && el.clientHeight ? el.clientHeight : 560;
+            const view = canvasState.current.view;
+            return { x: (width / 2 - view.x) / view.scale, y: (height / 2 - view.y) / view.scale };
+          }, []);
+
+          const addCanvasNode = useCallback(
+            (kind, extra = {}) => {
+              const at = canvasCenter();
+              const size = kind === 'text' ? { w: 250, h: 156 } : { w: 232, h: 214 };
+              const node = {
+                id: canvasNodeId(),
+                kind,
+                x: Math.round(at.x - size.w / 2 + (extra.dx || 0)),
+                y: Math.round(at.y - size.h / 2 + (extra.dy || 0)),
+                w: extra.w || size.w,
+                h: extra.h || size.h,
+                title: extra.title || (kind === 'text' ? t('canvasText') : t('canvasImage')),
+                src: extra.src || '',
+                text: extra.text || '',
+                note: extra.note || '',
+              };
+              commitCanvas((prev) => ({ ...prev, nodes: [...prev.nodes, node].slice(-CANVAS_LIMIT) }));
+              setCanvasSel([node.id]);
+              return node.id;
+            },
+            [canvasCenter, commitCanvas, t],
+          );
+
+          // 参考库缩略图一个按钮就能落到画布：把图抓成内联，顺手切过去。
+          const refToCanvas = useCallback(
+            async (work) => {
+              if (!work || !work.imageUrl) return;
+              setCanvasMsg({ text: t('canvasWorking'), bad: false });
+              const data = await remoteImageToDataUrl(work.imageUrl, CANVAS_MAX_EDGE);
+              if (!data) {
+                setCanvasMsg({ text: t('canvasBadImage'), bad: true });
+                return;
+              }
+              addCanvasNode('image', {
+                src: data,
+                title: work.name || t('canvasImage'),
+                note: (Array.isArray(work.tags) ? work.tags.slice(0, 4).join('・') : '') || work.lib || '',
+              });
+              setPage('canvas');
+              setCanvasMsg({ text: '', bad: false });
+            },
+            [addCanvasNode, t],
+          );
+
+          const patchCanvasNode = useCallback(
+            (id, patch, silent) => {
+              commitCanvas(
+                (prev) => ({
+                  ...prev,
+                  nodes: prev.nodes.map((node) => (node.id === id ? { ...node, ...patch } : node)),
+                }),
+                { silent },
+              );
+            },
+            [commitCanvas],
+          );
+
+          // 参考库条目 → 选中的那个节点。图片节点换图，文字节点把名字和标签追加成一行提示词。
+          const applyRefToNode = useCallback(
+            async (work) => {
+              const state = canvasState.current;
+              const sel = state.nodes.filter((node) => canvasSel.includes(node.id));
+              const target = sel.length === 1 ? sel[0] : null;
+              if (!target) {
+                setCanvasMsg({ text: t('canvasPickOne'), bad: true });
+                return;
+              }
+              const tags = Array.isArray(work.tags) ? work.tags.slice(0, 6) : [];
+              if (target.kind === 'text') {
+                const line = [work.name].concat(tags).filter(Boolean).join('、');
+                const head = String(target.text).replace(/\s+$/, '');
+                const next = head ? head + '\n' + line : line;
+                patchCanvasNode(target.id, { text: next });
+                setCanvasMsg({ text: t('canvasApplied'), bad: false });
+                return;
+              }
+              setCanvasMsg({ text: t('canvasWorking'), bad: false });
+              const data = await remoteImageToDataUrl(work.imageUrl, CANVAS_MAX_EDGE);
+              if (!data) {
+                setCanvasMsg({ text: t('canvasBadImage'), bad: true });
+                return;
+              }
+              patchCanvasNode(target.id, {
+                src: data,
+                title: work.name || t('canvasImage'),
+                note: tags.join('・') || work.lib || '',
+              });
+              setCanvasMsg({ text: t('canvasApplied'), bad: false });
+            },
+            [canvasSel, patchCanvasNode, t],
+          );
+
+          const removeCanvasNode = useCallback(
+            (id) => {
+              commitCanvas((prev) => ({
+                ...prev,
+                nodes: prev.nodes.filter((node) => node.id !== id),
+                edges: prev.edges.filter((edge) => edge.from !== id && edge.to !== id),
+              }));
+              setCanvasSel((prev) => prev.filter((item) => item !== id));
+            },
+            [commitCanvas],
+          );
+
+          const toggleCanvasSel = useCallback((id, additive) => {
+            setCanvasSel((prev) => {
+              if (!additive) return prev.length === 1 && prev[0] === id ? [] : [id];
+              return prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id];
+            });
+          }, []);
+
+          const canvasFit = useCallback(() => {
+            const el = canvasRef.current;
+            const nodes = canvasState.current.nodes;
+            if (!el || nodes.length === 0) return;
+            const minX = Math.min(...nodes.map((node) => node.x));
+            const minY = Math.min(...nodes.map((node) => node.y));
+            const maxX = Math.max(...nodes.map((node) => node.x + node.w));
+            const maxY = Math.max(...nodes.map((node) => node.y + node.h));
+            const pad = 48;
+            const width = el.clientWidth || 820;
+            const height = el.clientHeight || 560;
+            const scale = Math.min(
+              CANVAS_MAX_SCALE,
+              Math.max(
+                CANVAS_MIN_SCALE,
+                Math.min((width - pad * 2) / Math.max(1, maxX - minX), (height - pad * 2) / Math.max(1, maxY - minY)),
+              ),
+            );
+            const x = width / 2 - ((minX + maxX) / 2) * scale;
+            const y = height / 2 - ((minY + maxY) / 2) * scale;
+            commitCanvas((prev) => ({ ...prev, view: { x, y, scale } }));
+          }, [commitCanvas]);
+
+          const canvasZoomBy = useCallback(
+            (factor) => {
+              const el = canvasRef.current;
+              const width = el && el.clientWidth ? el.clientWidth : 820;
+              const height = el && el.clientHeight ? el.clientHeight : 560;
+              const view = canvasState.current.view;
+              const scale = Math.min(CANVAS_MAX_SCALE, Math.max(CANVAS_MIN_SCALE, view.scale * factor));
+              const ratio = scale / view.scale;
+              commitCanvas((prev) => ({
+                ...prev,
+                view: {
+                  scale,
+                  x: width / 2 - (width / 2 - view.x) * ratio,
+                  y: height / 2 - (height / 2 - view.y) * ratio,
+                },
+              }));
+            },
+            [commitCanvas],
+          );
+
+          // 滑杆和「回到 100%」都走这里：以视口中心为锚改缩放，位置不跟着跳。
+          const canvasZoomTo = useCallback(
+            (scale) => {
+              const el = canvasRef.current;
+              const width = el && el.clientWidth ? el.clientWidth : 820;
+              const height = el && el.clientHeight ? el.clientHeight : 560;
+              const view = canvasState.current.view;
+              const next = Math.min(CANVAS_MAX_SCALE, Math.max(CANVAS_MIN_SCALE, scale));
+              if (!Number.isFinite(next) || next === view.scale) return;
+              const ratio = next / view.scale;
+              commitCanvas((prev) => ({
+                ...prev,
+                view: {
+                  scale: next,
+                  x: width / 2 - (width / 2 - view.x) * ratio,
+                  y: height / 2 - (height / 2 - view.y) * ratio,
+                },
+              }));
+            },
+            [commitCanvas],
+          );
+
+          // ── 选择、复制、全选 ──────────────────────────────────────
+          const canvasSelectAll = useCallback(() => {
+            setCanvasSel(canvasState.current.nodes.map((node) => node.id));
+          }, []);
+
+          const canvasCopy = useCallback(() => {
+            const picked = canvasState.current.nodes.filter((node) => canvasSel.includes(node.id));
+            if (picked.length === 0) {
+              setCanvasMsg({ text: t('canvasNothing'), bad: true });
+              return;
+            }
+            canvasClip.current = picked.map((node) => ({ ...node }));
+            setCanvasMsg({ text: t('canvasCopied').replace('{n}', String(picked.length)), bad: false });
+          }, [canvasSel, t]);
+
+          // 粘贴的节点整体右下偏移 28px，并重新生成 id；连线也跟着复制。
+          const canvasPaste = useCallback(() => {
+            const clip = canvasClip.current;
+            if (!clip || clip.length === 0) return;
+            const map = new Map();
+            const fresh = clip.map((node) => {
+              const id = canvasNodeId();
+              map.set(node.id, id);
+              return { ...node, id, x: Math.round(node.x + 28), y: Math.round(node.y + 28) };
+            });
+            canvasClip.current = fresh.map((node) => ({ ...node }));
+            commitCanvas((prev) => {
+              const edges = prev.edges
+                .filter((edge) => map.has(edge.from) && map.has(edge.to))
+                .map((edge) => ({ id: canvasNodeId(), from: map.get(edge.from), to: map.get(edge.to) }));
+              return {
+                ...prev,
+                nodes: [...prev.nodes, ...fresh].slice(-CANVAS_LIMIT),
+                edges: [...prev.edges, ...edges].slice(-CANVAS_LIMIT * 2),
+              };
+            });
+            setCanvasSel(fresh.map((node) => node.id));
+          }, [commitCanvas]);
+
+          // ── 导出 / 导入 ──────────────────────────────────────────
+          const canvasExport = useCallback(() => {
+            const state = canvasState.current;
+            const payload = { app: 'dsh-drawcraft', version: 1, at: new Date().toISOString(), ...state };
+            const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = t('canvasExportName');
+            link.click();
+            setTimeout(() => URL.revokeObjectURL(url), 4000);
+          }, [t]);
+
+          const canvasImport = useCallback(
+            async (file) => {
+              if (!file) return;
+              let parsed = null;
+              try {
+                parsed = JSON.parse(await file.text());
+              } catch {
+                setCanvasMsg({ text: t('canvasImportBad'), bad: true });
+                return;
+              }
+              if (!parsed || !Array.isArray(parsed.nodes)) {
+                setCanvasMsg({ text: t('canvasImportBad'), bad: true });
+                return;
+              }
+              if (!window.confirm(t('canvasImportAsk'))) return;
+              const next = {
+                nodes: parsed.nodes
+                  .filter((node) => node && typeof node.id === 'string')
+                  .slice(-CANVAS_LIMIT)
+                  .map((node) => ({
+                    id: String(node.id),
+                    kind: node.kind === 'text' ? 'text' : 'image',
+                    x: Number(node.x) || 0,
+                    y: Number(node.y) || 0,
+                    w: Math.max(120, Number(node.w) || 240),
+                    h: Math.max(80, Number(node.h) || 240),
+                    src: typeof node.src === 'string' ? node.src : '',
+                    text: typeof node.text === 'string' ? node.text : '',
+                    title: typeof node.title === 'string' ? node.title : '',
+                    note: typeof node.note === 'string' ? node.note : '',
+                    lost: Boolean(node.lost),
+                    meta: node.meta && typeof node.meta === 'object' ? node.meta : undefined,
+                  })),
+                edges: Array.isArray(parsed.edges)
+                  ? parsed.edges.filter((edge) => edge && edge.from && edge.to).map((edge) => ({ id: String(edge.id || canvasNodeId()), from: String(edge.from), to: String(edge.to) }))
+                  : [],
+                view: { x: 0, y: 0, scale: 1 },
+              };
+              commitCanvas(() => next);
+              setCanvasSel([]);
+              setCanvasMsg({ text: t('canvasImportDone'), bad: false });
+            },
+            [commitCanvas, t],
+          );
+
+          const canvasLoadFile = useCallback(
+            async (file, extra = {}) => {
+              if (!file || !String(file.type || '').startsWith('image/')) return;
+              // readImageFile 直接返回 data URL 字符串（不是 {data,name} 那种对象），别当成对象取 .data。
+              const data = await readImageFile(file, CANVAS_MAX_EDGE);
+              if (!data) {
+                setCanvasMsg({ text: t('canvasBadImage'), bad: true });
+                return;
+              }
+              const name = file.name && file.name !== 'blob' ? file.name : t('canvasImage');
+              addCanvasNode('image', { src: data, title: name, note: extra.note || '' });
+            },
+            [addCanvasNode, t],
+          );
+
+          // 从网页/微信/Word 复制来的往往只有图链，没有文件本体，得自己抓回来。
+          const canvasPasteLink = useCallback(
+            async (url) => {
+              const data = await remoteImageToDataUrl(url, CANVAS_MAX_EDGE);
+              if (!data) {
+                setCanvasMsg({ text: t('canvasBadImage'), bad: true });
+                return;
+              }
+              addCanvasNode('image', { src: data, title: t('canvasPasteLink'), note: '' });
+            },
+            [addCanvasNode, t],
+          );
+          useEffect(() => {
+            canvasPasteRef.current = (file, url) => {
+              if (file) {
+                void canvasLoadFile(file);
+                return;
+              }
+              if (url) {
+                void canvasPasteLink(url);
+                return;
+              }
+              canvasPaste();
+            };
+          }, [canvasLoadFile, canvasPaste, canvasPasteLink]);
+
+          // 从画布出图：选中的文本节点当提示词，选中的图按顺序当主图与参考图，
+          // 结果作为新节点挂在右上方，并从每个输入节点连一条血缘线过去。
+          const canvasGenerate = useCallback(async (idList) => {
+            if (canvasBusy) return;
+            const state = canvasState.current;
+            // 不传 id 就用当前选中；从节点上的「⚡」进来时直接指定这个节点和它的上游。
+            const ids = Array.isArray(idList) && idList.length > 0 ? idList : canvasSel;
+            const picked = state.nodes.filter((node) => ids.includes(node.id));
+            if (picked.length === 0) {
+              setCanvasMsg({ text: t('canvasPickFirst'), bad: true });
+              return;
+            }
+            const textNode = picked.find((node) => node.kind === 'text' && String(node.text || '').trim());
+            const images = picked.filter((node) => node.src);
+            const words = String(textNode?.text || '').trim();
+            // 画布上的「图一/图二/图三」按连线数：上游是图一，跟着线往下走。
+            // 发送顺序却是主体优先，先把编号定下来，提示词才对得上。
+            const ordered = chainOrder(images, state.edges);
+            const slotOf = new Map(ordered.map((node, at) => [node.id, at + 1]));
+            // 主图不能按节点顺序随便取：白模/深度图排在前面时会被当主体，
+            // 出来就是 3D 素模或动漫脸。按「像不像真人照片」打分，最像的当主图。
+            let primary = '';
+            let primaryNode = null;
+            let extras = [];
+            let extrasNodes = [];
+            if (images.length > 0) {
+              // 主体就是连线上的第一张，除非你点了 ◎ 指定别的。
+              // 以前这里按「肤色占比」猜哪张像真人，猜错过好几次：人台、深度图、
+              // 偏白的照片都能骗过它。顺序是你看得见的东西，猜是看不见的，用看得见的。
+              const pinned = ordered.find((node) => node.subject);
+              primaryNode = pinned || ordered[0];
+              primary = primaryNode.src;
+              // 参考图按画布顺序排，不按分数排——否则「图二」又对不上了。
+              extrasNodes = ordered.filter((node) => node.id !== primaryNode.id).slice(0, 4);
+              extras = extrasNodes.map((node) => node.src);
+            }
+            if (!words && !primary) {
+              setCanvasMsg({ text: t('canvasNeedWords'), bad: true });
+              return;
+            }
+            // 「头发换成双马尾」这种是改图指令，不是能独立成立的提示词。
+            // 没有主图还硬发，模型只会凭空造一个不相干的人出来。
+            const instruction = /(换成|换掉|改成|改为|变成|变短|变长|去掉|去除|加上|添加|替换|转成|改成)/.test(words);
+            if (!primary && instruction) {
+              setCanvasMsg({ text: t('canvasNeedSubject'), bad: true });
+              return;
+            }
+            // 只发一句「换成双马尾」，模型会自己挑风格，挑的是插画。
+            // 补一条写实约束顶住；用户明确写了要插画/动漫时这句会被它自己的要求覆盖。
+            const refNote = extras.length > 0 ? CANVAS_REF_NOTE[language] || CANVAS_REF_NOTE.en : '';
+            // 服装库里确实有透视薄纱（SUM-0192 那件），照抄就会被上游判裸露。
+            // 这句不改变版型，只是要求做成不透明面料，实测同组参考图从 400 变成通过。
+            const opaqueNote = extras.length > 0 ? CANVAS_OPAQUE_NOTE[language] || CANVAS_OPAQUE_NOTE.en : '';
+            // 主图如果是白模、深度图、人台这类非真人图（肤色占比接近 0），
+            // 直接当主体会出 3D 素模或二次元脸。这种图本来就只该提供姿势，
+            // 所以先转成姿态卡再发，并把「别照搬卡片风格」写进提示词。
+            let poseCarded = false;
+            if (primary && (await imageLooksFlat(primary))) {
+              primary = await poseCardDataUrl(primary);
+              poseCarded = true;
+            }
+            const prompt = primary
+              ? `${EDIT_PREFIX[language] || EDIT_PREFIX.en}${orderNote(
+                  ordered.map((node) => ({
+                    slot: slotOf.get(node.id),
+                    title: String(node.title || '').slice(0, 18) || t('canvasImage'),
+                  })),
+                  slotOf.get(primaryNode.id) || 1,
+                  language,
+                )}${CANVAS_REAL_NOTE[language] || CANVAS_REAL_NOTE.en}${
+                  poseCarded ? CANVAS_FIX_NOTE[language] || CANVAS_FIX_NOTE.en : ''
+                }${refNote}${opaqueNote}${words || t('canvasFollowImage')}`
+              : `${CANVAS_REAL_NOTE[language] || CANVAS_REAL_NOTE.en}${words}`;
+            setCanvasBusy('pending');
+            setCanvasMsg({ text: t('canvasWorking'), bad: false });
+            try {
+              const shots = await requestImage({ prompt, primary, extras });
+              const shot = shots[0];
+              const anchor = picked[0];
+              const id = canvasNodeId();
+              const width = 236;
+              const height = 224;
+              const node = {
+                id,
+                kind: 'image',
+                x: Math.round(anchor.x + anchor.w + 72),
+                y: Math.round(anchor.y),
+                w: width,
+                h: height,
+                title: words ? words.slice(0, 24) : t('canvasResult'),
+                src: `data:${shot.mime};base64,${shot.b64}`,
+                text: '',
+                note: shots.carded || poseCarded
+                  ? t('canvasCarded')
+                  : shots.opaqued
+                    ? t('canvasOpaqued')
+                    : new Date().toLocaleTimeString(),
+                // 把这次用了什么记下来，重试时才不用重新猜一遍。
+                meta: {
+                  prompt: words,
+                  withImage: Boolean(primary),
+                  mode: primary ? 'edit' : 'text',
+                  // 出图画歪时，第一个要问的就是「到底谁被当成主体了」。
+                  // 以前只有 ids，看不出哪张是主图，这次把标题也存下来。
+                  primary: primaryNode ? String(primaryNode.title || '').slice(0, 24) : '',
+                  extras: extrasNodes.map((item) => String(item.title || '').slice(0, 24)),
+                  model: effectiveImageModel || '',
+                  size: imageSize || '',
+                  quality: imageQuality || '',
+                  sources: picked.map((item) => item.id),
+                },
+              };
+              commitCanvas((prev) => ({
+                nodes: [...prev.nodes, node].slice(-CANVAS_LIMIT),
+                edges: [
+                  ...prev.edges,
+                  ...picked.map((item) => ({ id: `e_${item.id}_${id}`, from: item.id, to: id })),
+                ],
+                view: prev.view,
+              }));
+              setCanvasSel([id]);
+              setCanvasMsg({ text: t('canvasDone'), bad: false });
+            } catch (failure) {
+              const message = failure?.message || String(failure);
+              const rejected = failure?.code === 'upstream-rejected';
+              setCanvasMsg({
+                text: rejected ? `${message}\n\n${t('rejectedHint')}` : message,
+                bad: true,
+              });
+            } finally {
+              setCanvasBusy('');
+            }
+          }, [canvasBusy, canvasSel, commitCanvas, effectiveImageModel, imageQuality, imageSize, language, requestImage, t]);
+
+          // 节点自己的「⚡」：拿这个节点，加上所有连进它的上游节点，一起出图。
+          const canvasGenerateFrom = useCallback(
+            (node) => {
+              if (!node) return;
+              const state = canvasState.current;
+              // 沿连线一路往上收：照片 → 服装 → 姿势 → 提示词 这种链，
+              // 点在最后一段也得把前面几张一起带上，否则主图就丢了。
+              const ids = new Set([node.id]);
+              const queue = [node.id];
+              while (queue.length > 0) {
+                const at = queue.shift();
+                state.edges.forEach((edge) => {
+                  if (edge.to !== at || ids.has(edge.from)) return;
+                  ids.add(edge.from);
+                  queue.push(edge.from);
+                });
+              }
+              void canvasGenerate([...ids]);
+            },
+            [canvasGenerate],
+          );
+
+          const canvasSendToWorkshop = useCallback(
+            (node) => {
+              if (!node) return;
+              if (node.kind === 'text' && node.text) setIdea(node.text);
+              else if (node.src) {
+                setImage({ data: node.src, name: node.title || t('canvasImage') });
+                if (imageRef) imageRef.current = { data: node.src, name: node.title || t('canvasImage') };
+              }
+              setPage('prompt');
+            },
+            [t],
+          );
+
+          // 按节点记下的参数再来一张：自己当主图（图生图），meta.prompt 当描述，
+          // 落在它右边。上游节点已经变了也没关系，这里只信节点自己的记录。
+          const canvasRetryNode = useCallback(
+            async (node) => {
+              if (!node || !node.meta || canvasBusy) return;
+              const meta = node.meta;
+              const primary = node.src || '';
+              const words = String(meta.prompt || '').trim();
+              if (!primary && !words) return;
+              const prompt = primary
+                ? `${EDIT_PREFIX[language] || EDIT_PREFIX.en}${CANVAS_REAL_NOTE[language] || CANVAS_REAL_NOTE.en}${words || t('canvasFollowImage')}`
+                : `${CANVAS_REAL_NOTE[language] || CANVAS_REAL_NOTE.en}${words}`;
+              setCanvasBusy(node.id);
+              setCanvasMsg({ text: t('canvasWorking'), bad: false });
+              try {
+                const shots = await requestImage({
+                  prompt,
+                  primary,
+                  extras: [],
+                  size: meta.size || '',
+                  quality: meta.quality || '',
+                });
+                const shot = shots[0];
+                const id = canvasNodeId();
+                const fresh = {
+                  id,
+                  kind: 'image',
+                  x: Math.round(node.x + node.w + 72),
+                  y: Math.round(node.y),
+                  w: node.w || 236,
+                  h: node.h || 224,
+                  title: words ? words.slice(0, 24) : t('canvasResult'),
+                  src: `data:${shot.mime};base64,${shot.b64}`,
+                  text: '',
+                  note: `${new Date().toLocaleTimeString()} · ${meta.model || 'auto'}`,
+                  meta: { ...meta, sources: [node.id] },
+                };
+                commitCanvas((prev) => ({
+                  nodes: [...prev.nodes, fresh].slice(-CANVAS_LIMIT),
+                  edges: [...prev.edges, { id: `e_${node.id}_${id}`, from: node.id, to: id }],
+                  view: prev.view,
+                }));
+                setCanvasSel([id]);
+                setCanvasMsg({ text: t('canvasDone'), bad: false });
+              } catch (failure) {
+                const message = failure?.message || String(failure);
+                const rejected = failure?.code === 'upstream-rejected';
+                setCanvasMsg({ text: rejected ? `${message}\n\n${t('rejectedHint')}` : message, bad: true });
+              } finally {
+                setCanvasBusy('');
+              }
+            },
+            [canvasBusy, commitCanvas, language, requestImage, t],
+          );
 
           const onDropImage = useCallback(
             (event) => {
@@ -2053,6 +3442,1375 @@ window.__ModuleLoader__.load({
           const fields = catalog.fields || FALLBACK.fields;
           const fieldRows = result ? fields.filter((field) => result.fields?.[field.key]) : [];
 
+          // ── 画布渲染 ────────────────────────────────────────────────
+          // 拖动/缩放靠 pointer capture 落在节点头自己身上，所以 move 也挂在那里。
+          const canvasStartDrag = (event, node, kind) => {
+            event.stopPropagation();
+            event.preventDefault();
+            event.currentTarget.setPointerCapture?.(event.pointerId);
+            // 拖动全程只在抬手时压一次栈，否则拖一下就是几十步撤销。
+            canvasDragBase.current = canvasState.current;
+            canvasGrab.current = {
+              id: node.id,
+              kind,
+              startX: event.clientX,
+              startY: event.clientY,
+              x: node.x,
+              y: node.y,
+              w: node.w,
+              h: node.h,
+            };
+          };
+          const canvasDragMove = (event) => {
+            const grab = canvasGrab.current;
+            if (!grab) return;
+            const view = canvasState.current.view;
+            const dx = (event.clientX - grab.startX) / view.scale;
+            const dy = (event.clientY - grab.startY) / view.scale;
+            if (grab.kind === 'move') {
+              patchCanvasNode(grab.id, { x: Math.round(grab.x + dx), y: Math.round(grab.y + dy) }, true);
+            } else {
+              patchCanvasNode(
+                grab.id,
+                { w: Math.max(120, Math.round(grab.w + dx)), h: Math.max(74, Math.round(grab.h + dy)) },
+                true,
+              );
+            }
+          };
+          const canvasDragEnd = (event) => {
+            const grab = canvasGrab.current;
+            const base = canvasDragBase.current;
+            canvasGrab.current = null;
+            canvasDragBase.current = null;
+            if (!grab || !base) return;
+            const now = canvasState.current.nodes.find((node) => node.id === grab.id);
+            const before = base.nodes.find((node) => node.id === grab.id);
+            if (now && before && (now.x !== before.x || now.y !== before.y || now.w !== before.w || now.h !== before.h)) {
+              canvasRemember(base);
+            }
+            if (event && event.currentTarget && event.currentTarget.releasePointerCapture) {
+              try {
+                event.currentTarget.releasePointerCapture(event.pointerId);
+              } catch {
+                /* 指针已经释放了，无所谓 */
+              }
+            }
+          };
+
+          // 屏幕坐标 → 世界坐标。连线、拖端口都要用。
+          const canvasToWorld = (clientX, clientY) => {
+            const el = canvasRef.current;
+            const rect = el ? el.getBoundingClientRect() : { left: 0, top: 0 };
+            const view = canvasState.current.view;
+            return { x: (clientX - rect.left - view.x) / view.scale, y: (clientY - rect.top - view.y) / view.scale };
+          };
+
+          const canvasRemoveEdge = useCallback(
+            (id) => {
+              commitCanvas((prev) => ({ ...prev, edges: prev.edges.filter((edge) => edge.id !== id) }));
+            },
+            [commitCanvas],
+          );
+
+          // 从节点边上那个小圆点拖出去，落在另一个节点上就连一条线。
+          // 两个坑：① 节点自己的拖动监听也挂在 window 上，会被抢走，所以这里一律用捕获阶段；
+          // ② 拖动过程不靠 React 重渲染（每帧 setState 太慢，还会被其他 setState 合并掉），
+          //    直接把预览线写到 SVG 的那个 path 上。
+          const canvasPortDown = (event, node, side) => {
+            event.stopPropagation();
+            event.preventDefault();
+            const origin =
+              side === 'out'
+                ? { x: node.x + node.w, y: node.y + node.h / 2 }
+                : { x: node.x, y: node.y + node.h / 2 };
+            const at = canvasToWorld(event.clientX, event.clientY);
+            setCanvasLink({ from: node.id, side, ox: origin.x, oy: origin.y, x: at.x, y: at.y });
+            setLinkFrom(node.id);
+            const draw = (point) => {
+              const path = livePath.current;
+              if (!path) return;
+              const cx = Math.max(40, Math.abs(point.x - origin.x) / 2);
+              path.setAttribute(
+                'd',
+                `M ${origin.x} ${origin.y} C ${origin.x + cx} ${origin.y}, ${point.x - cx} ${point.y}, ${point.x} ${point.y}`,
+              );
+            };
+            draw(at);
+            const onMove = (moveEvent) => {
+              moveEvent.preventDefault();
+              draw(canvasToWorld(moveEvent.clientX, moveEvent.clientY));
+            };
+            const onUp = (upEvent) => {
+              window.removeEventListener('pointermove', onMove, true);
+              window.removeEventListener('pointerup', onUp, true);
+              window.removeEventListener('pointercancel', onUp, true);
+              setCanvasLink(null);
+              setLinkFrom('');
+              if (livePath.current) livePath.current.setAttribute('d', '');
+              const el = document.elementFromPoint(upEvent.clientX, upEvent.clientY);
+              const holder = el && el.closest ? el.closest('[data-node-id]') : null;
+              const target = holder ? holder.getAttribute('data-node-id') : '';
+              if (!target || target === node.id) {
+                setCanvasMsg({ text: t('canvasLinkMiss'), bad: false });
+                return;
+              }
+              const from = side === 'out' ? node.id : target;
+              const to = side === 'out' ? target : node.id;
+              commitCanvas((prev) => {
+                if (prev.edges.some((edge) => edge.from === from && edge.to === to)) return prev;
+                return { ...prev, edges: [...prev.edges, { id: canvasNodeId(), from, to }].slice(-CANVAS_LIMIT * 2) };
+              });
+              setCanvasMsg({ text: t('canvasLinkDone'), bad: false });
+            };
+            window.addEventListener('pointermove', onMove, true);
+            window.addEventListener('pointerup', onUp, true);
+            window.addEventListener('pointercancel', onUp, true);
+          };
+
+          const canvasPanStart = (event) => {
+            if (event.button !== 0) return;
+            // 从节点上按下不接管：容器一 setPointerCapture，图片的 click 就收不到了，
+            // 点图开大图会失灵；从节点上拖应该是拖节点，不是平移画布。
+            const from = event.target;
+            if (from && from.closest && from.closest('.dpf-canvas-node')) return;
+            canvasRef.current?.setPointerCapture?.(event.pointerId);
+            const view = canvasState.current.view;
+            const el = canvasRef.current;
+            const rect = el ? el.getBoundingClientRect() : { left: 0, top: 0 };
+            // 按住 Shift 拖空白 = 框选，不按 = 平移。
+            if (event.shiftKey) {
+              const at = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+              canvasMarquee.current = { ax: at.x, ay: at.y, bx: at.x, by: at.y, ox: rect.left, oy: rect.top };
+              setCanvasBox({ left: at.x, top: at.y, width: 0, height: 0 });
+              return;
+            }
+            canvasPan.current = { startX: event.clientX, startY: event.clientY, x: view.x, y: view.y };
+            setCanvasMsg((prev) => (prev.text ? { text: '', bad: false } : prev));
+          };
+          const canvasPanMove = (event) => {
+            const marquee = canvasMarquee.current;
+            if (marquee) {
+              const bx = event.clientX - marquee.ox;
+              const by = event.clientY - marquee.oy;
+              marquee.bx = bx;
+              marquee.by = by;
+              setCanvasBox({
+                left: Math.min(marquee.ax, bx),
+                top: Math.min(marquee.ay, by),
+                width: Math.abs(bx - marquee.ax),
+                height: Math.abs(by - marquee.ay),
+              });
+              return;
+            }
+            const pan = canvasPan.current;
+            if (!pan) return;
+            commitCanvas(
+              (prev) => ({
+                ...prev,
+                view: {
+                  ...prev.view,
+                  x: pan.x + (event.clientX - pan.startX),
+                  y: pan.y + (event.clientY - pan.startY),
+                },
+              }),
+              { silent: true },
+            );
+          };
+          const canvasPanEnd = () => {
+            const pan = canvasPan.current;
+            const marquee = canvasMarquee.current;
+            canvasPan.current = null;
+            canvasMarquee.current = null;
+            setCanvasBox(null);
+            if (marquee) {
+              const view = canvasState.current.view;
+              const left = Math.min(marquee.ax, marquee.bx);
+              const top = Math.min(marquee.ay, marquee.by);
+              const right = Math.max(marquee.ax, marquee.bx);
+              const bottom = Math.max(marquee.ay, marquee.by);
+              if (right - left < 6 && bottom - top < 6) return;
+              const x1 = (left - view.x) / view.scale;
+              const y1 = (top - view.y) / view.scale;
+              const x2 = (right - view.x) / view.scale;
+              const y2 = (bottom - view.y) / view.scale;
+              const hit = canvasState.current.nodes
+                .filter((node) => node.x < x2 && node.x + node.w > x1 && node.y < y2 && node.y + node.h > y1)
+                .map((node) => node.id);
+              setCanvasSel(hit);
+              return;
+            }
+            if (pan) {
+              // 平移也算一次可撤销的视图变化，但只有真的动了才记。
+              const moved =
+                Math.abs(canvasState.current.view.x - pan.x) > 1 || Math.abs(canvasState.current.view.y - pan.y) > 1;
+              if (moved) canvasRemember({ ...canvasState.current, view: { ...canvasState.current.view, x: pan.x, y: pan.y } });
+            }
+          };
+
+          const renderCanvasNode = (node) => {
+            const selected = canvasSel.includes(node.id);
+            const busy = canvasBusy === node.id || (canvasBusy === 'pending' && selected);
+            return h(
+              'div',
+              {
+                key: node.id,
+                className: 'dpf-canvas-node',
+                'data-kind': node.kind,
+                'data-node-id': node.id,
+                'data-sel': selected ? '1' : undefined,
+                'data-linkfrom': linkFrom === node.id ? '1' : undefined,
+                style: { left: node.x, top: node.y, width: node.w, height: node.h },
+                onPointerDown: (event) => {
+                  const target = event.target;
+                  if (
+                    target &&
+                    target.closest &&
+                    (target.closest('.dpf-canvas-head') ||
+                      target.closest('.dpf-canvas-resize') ||
+                      target.closest('textarea') ||
+                      target.closest('button'))
+                  ) {
+                    return;
+                  }
+                  toggleCanvasSel(node.id, event.shiftKey || event.metaKey || event.ctrlKey);
+                },
+              },
+              h(
+                'div',
+                {
+                  className: 'dpf-canvas-head',
+                  onPointerDown: (event) => canvasStartDrag(event, node, 'move'),
+                  onPointerMove: canvasDragMove,
+                  onPointerUp: canvasDragEnd,
+                  onPointerCancel: canvasDragEnd,
+                },
+                h('b', null, node.title || (node.kind === 'text' ? t('canvasText') : t('canvasImage'))),
+                node.kind === 'text' || node.src
+                  ? h(
+                      'button',
+                      {
+                        className: 'dpf-canvas-x',
+                        type: 'button',
+                        title: t('canvasGenerateNode'),
+                        onPointerDown: (event) => event.stopPropagation(),
+                        onClick: () => canvasGenerateFrom(node),
+                      },
+                      '⚡',
+                    )
+                  : null,
+                node.meta && (node.meta.prompt || node.src)
+                  ? h(
+                      'button',
+                      {
+                        className: 'dpf-canvas-x',
+                        type: 'button',
+                        title: t('canvasRetry'),
+                        onPointerDown: (event) => event.stopPropagation(),
+                        onClick: () => void canvasRetryNode(node),
+                      },
+                      '↻',
+                    )
+                  : null,
+                node.kind === 'text' || node.src
+                  ? h(
+                      'button',
+                      {
+                        className: 'dpf-canvas-x',
+                        type: 'button',
+                        title: t('canvasToWorkshop'),
+                        onPointerDown: (event) => event.stopPropagation(),
+                        onClick: () => canvasSendToWorkshop(node),
+                      },
+                      '⇢',
+                    )
+                  : null,
+                node.src
+                  ? h(
+                      'button',
+                      {
+                        className: node.subject ? 'dpf-canvas-x is-subject' : 'dpf-canvas-x',
+                        type: 'button',
+                        title: node.subject ? t('canvasSubjectOn') : t('canvasSubjectOff'),
+                        onPointerDown: (event) => event.stopPropagation(),
+                        onClick: () => {
+                          // 指定谁是主体：画布上五张图时模型分不清哪张是「人」，
+                          // 与其猜，不如让你点一下。
+                          const next = !node.subject;
+                          commitCanvas((prev) => ({
+                            ...prev,
+                            nodes: prev.nodes.map((item) => ({
+                              ...item,
+                              subject: item.id === node.id ? next : false,
+                            })),
+                          }));
+                        },
+                      },
+                      node.subject ? '◉' : '◎',
+                    )
+                  : null,
+                node.src
+                  ? h(
+                      'button',
+                      {
+                        className: 'dpf-canvas-x',
+                        type: 'button',
+                        title: t('canvasSave'),
+                        onPointerDown: (event) => event.stopPropagation(),
+                        onClick: () => {
+                          const head = String(node.src).slice(0, 24);
+                          const ext = head.includes('image/webp') ? 'webp' : head.includes('image/jpeg') ? 'jpg' : 'png';
+                          const link = document.createElement('a');
+                          link.href = node.src;
+                          link.download = `${node.title || 'canvas'}.${ext}`;
+                          link.click();
+                        },
+                      },
+                      '↓',
+                    )
+                  : null,
+                h(
+                  'button',
+                  {
+                    className: 'dpf-canvas-x',
+                    type: 'button',
+                    title: t('clear'),
+                    onPointerDown: (event) => event.stopPropagation(),
+                    onClick: () => removeCanvasNode(node.id),
+                  },
+                  '×',
+                ),
+              ),
+              h(
+                'div',
+                { className: 'dpf-canvas-body' },
+                node.kind === 'text'
+                  ? h('textarea', {
+                      value: node.text || '',
+                      placeholder: `${t('canvasText')}…`,
+                      onChange: (event) => patchCanvasNode(node.id, { text: event.target.value }),
+                      onPointerDown: (event) => event.stopPropagation(),
+                      onKeyDown: (event) => event.stopPropagation(),
+                    })
+                  : node.src
+                    ? h('img', {
+                        src: node.src,
+                        alt: '',
+                        title: t('canvasOpenImage'),
+                        onClick: (event) => {
+                          // 单点开大图。选节点点边框或标题条，不抢这里。
+                          event.stopPropagation();
+                          openCanvasImage(node);
+                        },
+                      })
+                    : h('div', { className: 'dpf-canvas-empty' }, node.lost ? t('canvasBadImage') : t('canvasEmptyHint')),
+              ),
+              node.note ? h('div', { className: 'dpf-canvas-note', title: node.note }, node.note) : null,
+              node.meta && node.meta.model
+                ? h(
+                    'div',
+                    {
+                      className: 'dpf-canvas-note',
+                      style: { bottom: node.note ? 18 : 0, background: '#000000cc' },
+                      title: [
+                        `${t('canvasMeta')}: ${node.meta.model}${node.meta.size ? ` · ${node.meta.size}` : ''}`,
+                        node.meta.mode ? `${node.meta.mode}` : '',
+                        node.meta.primary ? `${t('canvasMetaPrimary')}: ${node.meta.primary}` : '',
+                        Array.isArray(node.meta.extras) && node.meta.extras.length > 0
+                          ? `${t('canvasMetaRefs')}: ${node.meta.extras.join(' / ')}`
+                          : '',
+                        node.meta.prompt ? `${node.meta.prompt}` : '',
+                      ].filter(Boolean).join('\n'),
+                    },
+                    `${node.meta.model}${node.meta.size ? ` · ${node.meta.size}` : ''}${
+                      node.meta.primary ? ` · ${node.meta.primary}` : ''
+                    }`,
+                  )
+                : null,
+              h('div', {
+                className: 'dpf-canvas-port',
+                'data-side': 'in',
+                title: t('canvasPortIn'),
+                onPointerDown: (event) => canvasPortDown(event, node, 'in'),
+              }),
+              h('div', {
+                className: 'dpf-canvas-port',
+                'data-side': 'out',
+                title: t('canvasPortOut'),
+                onPointerDown: (event) => canvasPortDown(event, node, 'out'),
+              }),
+              h('div', {
+                className: 'dpf-canvas-resize',
+                onPointerDown: (event) => canvasStartDrag(event, node, 'size'),
+                onPointerMove: canvasDragMove,
+                onPointerUp: canvasDragEnd,
+                onPointerCancel: canvasDragEnd,
+              }),
+              busy ? h('div', { className: 'dpf-canvas-badge', 'data-busy': '1' }, '…') : null,
+            );
+          };
+
+          const canvasEdgePath = (edge) => {
+            const from = canvas.nodes.find((node) => node.id === edge.from);
+            const to = canvas.nodes.find((node) => node.id === edge.to);
+            if (!from || !to) return '';
+            const x1 = from.x + from.w;
+            const y1 = from.y + from.h / 2;
+            const x2 = to.x;
+            const y2 = to.y + to.h / 2;
+            const mid = Math.max(36, Math.abs(x2 - x1) / 2);
+            return `M ${x1} ${y1} C ${x1 + mid} ${y1}, ${x2 - mid} ${y2}, ${x2} ${y2}`;
+          };
+
+          const previewCard =
+            preview.length > 0 || previewError || generating
+              ? h(
+          'div',
+          { className: 'dpf-card' },
+          h(
+            'div',
+            { className: 'dpf-card-head' },
+            h('span', { className: 'dpf-card-title' }, t('previewTitle')),
+            h('div', { className: 'dpf-spacer' }),
+            h(
+              'button',
+              { className: 'dpf-btn dpf-btn-ghost dpf-btn-small', type: 'button', disabled: generating, onClick: () => void renderOne() },
+              generating ? t('generating') : t('regenerate'),
+            ),
+          ),
+          previewError ? h('div', { className: 'dpf-error' }, previewError) : null,
+          generating && preview.length === 0 ? h('div', { className: 'dpf-preview-empty' }, t('generating')) : null,
+          previewStale && preview.length > 0
+            ? h('div', { className: 'dpf-stale' }, t('staleTag'))
+            : null,
+          preview.length > 0 &&
+            h(
+              'div',
+              { className: previewStale ? 'dpf-preview is-stale' : 'dpf-preview' },
+              preview.map((shot, index) =>
+                h(
+                  'div',
+                  { className: 'dpf-shot', key: index },
+                  h('img', {
+                    src: `data:${shot.mime};base64,${shot.b64}`,
+                    alt: '',
+                    title: t('zoomHint'),
+                    onClick: () => openLightbox(shot),
+                  }),
+                  h(
+                    'button',
+                    {
+                      className: 'dpf-shot-save',
+                      type: 'button',
+                      onClick: () => saveShot(shot, index),
+                    },
+                    t('save'),
+                  ),
+                ),
+              ),
+            ),
+        )
+              : null;
+
+          const imageBody = h(
+            'div',
+            { className: 'dpf-body dpf-body-image' },
+            h(
+              'div',
+              { className: 'dpf-side' },
+              h(
+                'button',
+                { className: 'dpf-side-tab', type: 'button', 'data-active': imageTab === 'text' || undefined, onClick: () => setImageTab('text') },
+                t('imageTabText'),
+              ),
+              h(
+                'button',
+                { className: 'dpf-side-tab', type: 'button', 'data-active': imageTab === 'edit' || undefined, onClick: () => setImageTab('edit') },
+                t('imageTabEdit'),
+              ),
+            ),
+            h(
+              'div',
+              { className: 'dpf-image-main' },
+              imageTab === 'edit' &&
+                h(
+                  'div',
+                  { className: 'dpf-section' },
+                  h(
+                    'div',
+                    { className: 'dpf-section-head' },
+                    h('span', { className: 'dpf-step' }, '01'),
+                    h('span', { className: 'dpf-section-title' }, t('imageSubject')),
+                  ),
+            h('input', {
+              type: 'file',
+              accept: 'image/*',
+              ref: fileRef,
+              style: { display: 'none' },
+              onChange: (event) => {
+                const file = event.target.files && event.target.files[0];
+                event.target.value = '';
+                if (file) void describeFile(file);
+              },
+            }),
+            h('input', {
+              type: 'file',
+              accept: 'image/*',
+              multiple: true,
+              ref: extraRef,
+              style: { display: 'none' },
+              onChange: (event) => {
+                const files = Array.from(event.target.files || []);
+                event.target.value = '';
+                for (const file of files.slice(0, 4)) void loadShot(file, true);
+              },
+            }),
+            image
+              ? h(
+                  'div',
+                  { className: 'dpf-thumb' },
+                  h('img', { src: image.data, alt: '' }),
+                  h(
+                    'div',
+                    { className: 'dpf-thumb-main' },
+                    h('div', { className: 'dpf-thumb-title' }, image.name || t('imageReady')),
+                    h('div', { className: 'dpf-thumb-sub' }, describing ? t('describing') : t('describeDone')),
+                  ),
+                  h('button', { className: 'dpf-btn dpf-btn-ghost dpf-btn-small', type: 'button', onClick: () => setImage(null) }, t('clear')),
+                )
+              : h(
+                  'div',
+                  {
+                    className: 'dpf-drop',
+                    'data-over': dragOver ? '1' : undefined,
+                    role: 'button',
+                    tabIndex: 0,
+                    title: t('describeHint'),
+                    onClick: pickImage,
+                    onKeyDown: (event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        pickImage();
+                      }
+                    },
+                    onDragOver: (event) => {
+                      event.preventDefault();
+                      setDragOver(true);
+                    },
+                    onDragLeave: () => setDragOver(false),
+                    onDrop: onDropImage,
+                  },
+                  describing ? t('describing') : dragOver ? t('imageListening') : t('dropImage'),
+                ),
+            // 附加参考槽：主图之外最多再塞四张，生成时一起作为图像条件。
+            h(
+              'div',
+              { className: 'dpf-refshots' },
+              h(
+                'div',
+                { className: 'dpf-refshots-row' },
+                refShots.map((shot, index) =>
+                  h(
+                    'div',
+                    { className: 'dpf-refshot', key: `${index}-${shot.name || ''}` },
+                    h('img', { src: shot.data, alt: '' }),
+                    h(
+                      'button',
+                      { type: 'button', className: 'dpf-refshot-x', onClick: () => removeRefShot(index), title: t('clear') },
+                      '×',
+                    ),
+                  ),
+                ),
+                refShots.length < 4 &&
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dpf-refshot-add',
+                      title: t('shotAdd'),
+                      onClick: () => extraRef.current?.click?.(),
+                      onDragOver: (event) => {
+                        event.preventDefault();
+                        setDragOver(true);
+                      },
+                      onDragLeave: () => setDragOver(false),
+                      onDrop: (event) => {
+                        event.preventDefault();
+                        setDragOver(false);
+                        const file = event.dataTransfer?.files?.[0];
+                        if (file) void loadShot(file, true);
+                      },
+                    },
+                    '+',
+                  ),
+              ),
+              h('div', { className: 'dpf-refshots-hint' }, t('shotHint')),
+              refs.length > 0 &&
+                h(
+                  'label',
+                  { className: 'dpf-check' },
+                  h('input', {
+                    type: 'checkbox',
+                    checked: usePoseRefs,
+                    onChange: (event) => setUsePoseRefs(event.target.checked),
+                  }),
+                  h('span', null, `${t('usePoseRefs')}（${refs.length}）`),
+                ),
+              h(
+                'label',
+                { className: 'dpf-check' },
+                h('input', {
+                  type: 'checkbox',
+                  checked: neutralize,
+                  onChange: (event) => setNeutralize(event.target.checked),
+                }),
+                h('span', null, t('neutralize')),
+              ),
+            ),
+            galleryBox,
+              ),
+              h(
+                'div',
+                { className: 'dpf-section' },
+                h(
+                  'div',
+                  { className: 'dpf-section-head' },
+                  h('span', { className: 'dpf-step' }, imageTab === 'edit' ? '02' : '01'),
+                  h('span', { className: 'dpf-section-title' }, t('imageWords')),
+                  h('span', { className: 'dpf-section-note' }, `${(editedPrompt || idea).length} ${t('ideaCount')}`),
+                ),
+                h('textarea', {
+                  className: 'dpf-textarea dpf-idea',
+                  value: editedPrompt,
+                  maxLength: 6000,
+                  placeholder: t('imageWordsPlaceholder'),
+                  onChange: (event) => setEditedPrompt(event.target.value),
+                }),
+              ),
+              h(
+                'div',
+                { className: 'dpf-section' },
+                h(
+                  'div',
+                  { className: 'dpf-section-head' },
+                  h('span', { className: 'dpf-step' }, imageTab === 'edit' ? '03' : '02'),
+                  h('span', { className: 'dpf-section-title' }, t('imageModel')),
+                ),
+            h(
+              'div',
+              { className: 'dpf-grid2', style: { marginTop: 8 }, title: t('imageModelHint') },
+              h(
+                'div',
+                null,
+                h('label', { className: 'dpf-label' }, t('imageSource')),
+                h(
+                  'div',
+                  { style: { display: 'flex', gap: 6, alignItems: 'center' } },
+                  h(
+                    'select',
+                    {
+                      className: 'dpf-select',
+                      value: currentSource,
+                      disabled: sourceOptions.length === 0,
+                      onChange: (event) => {
+                        const raw = event.target.value;
+                        if (raw.startsWith('host:')) {
+                          setSource('host');
+                          pickImageChannel(raw.slice(5));
+                          return;
+                        }
+                        setSource(raw);
+                        setImageModel((targets.find((item) => item.id === raw) || {}).models?.[0] || '');
+                      },
+                    },
+                    sourceOptions.length === 0
+                      ? [h('option', { key: 'none', value: '' }, t('sourceEmpty'))]
+                      : sourceOptions.map((item) => h('option', { key: item.id, value: item.id }, item.label)),
+                  ),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dpf-icon-btn',
+                      title: t('targetAdd'),
+                      onClick: () => {
+                        setTargetOpen((value) => !value);
+                        setTargetMsg('');
+                      },
+                    },
+                    targetOpen ? '×' : '+',
+                  ),
+                ),
+              ),
+              h(
+                'div',
+                null,
+                h('label', { className: 'dpf-label' }, t('imageModel')),
+                h(
+                  'select',
+                  {
+                    className: 'dpf-select',
+                    value: effectiveImageModel,
+                    disabled: imageModelChoices.length === 0,
+                    onChange: (event) => pickImageModel(event.target.value),
+                  },
+                  imageModelChoices.length === 0
+                    ? [h('option', { key: 'none', value: '' }, '—')]
+                    : imageModelChoices.map((item) => h('option', { key: item, value: item }, item)),
+                ),
+              ),
+            ),
+            targetOpen &&
+              h(
+                'div',
+                { className: 'dpf-target-form' },
+                h('input', {
+                  className: 'dpf-input',
+                  placeholder: t('targetName'),
+                  value: targetDraft.label,
+                  maxLength: 60,
+                  onChange: (event) => setTargetDraft({ ...targetDraft, label: event.target.value }),
+                }),
+                h('input', {
+                  className: 'dpf-input',
+                  placeholder: 'https://api.openai.com/v1',
+                  value: targetDraft.baseUrl,
+                  spellCheck: false,
+                  onChange: (event) => setTargetDraft({ ...targetDraft, baseUrl: event.target.value }),
+                }),
+                h('input', {
+                  className: 'dpf-input',
+                  type: 'password',
+                  placeholder: t('targetKey'),
+                  value: targetDraft.apiKey,
+                  onChange: (event) => setTargetDraft({ ...targetDraft, apiKey: event.target.value }),
+                }),
+                h('input', {
+                  className: 'dpf-input',
+                  placeholder: 'gpt-image-1, flux-1.1-pro',
+                  value: targetDraft.models,
+                  spellCheck: false,
+                  onChange: (event) => setTargetDraft({ ...targetDraft, models: event.target.value }),
+                }),
+                h(
+                  'div',
+                  { className: 'dpf-target-actions' },
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dpf-btn',
+                      style: { padding: '5px 10px', fontSize: 12 },
+                      disabled: targetBusy,
+                      onClick: () => void testTarget(),
+                    },
+                    targetBusy ? t('targetTesting') : t('targetTest'),
+                  ),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dpf-btn',
+                      style: { padding: '5px 10px', fontSize: 12 },
+                      disabled: targetBusy,
+                      onClick: () => void saveTarget(),
+                    },
+                    t('targetSave'),
+                  ),
+                  activeTarget &&
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        className: 'dpf-btn',
+                        style: { padding: '5px 10px', fontSize: 12 },
+                        onClick: () => void removeTarget(activeTarget.id),
+                      },
+                      t('targetRemove'),
+                    ),
+                ),
+                targetMsg &&
+                  h('div', { className: `dpf-target-msg${targetBad ? ' is-bad' : ''}` }, targetMsg),
+                h('div', { className: 'dpf-target-msg' }, t('targetHint')),
+              ),
+            imageModelChoices.length > 0 &&
+              h(
+                'div',
+                { className: 'dpf-grid2', style: { marginTop: 8 } },
+                h(
+                  'div',
+                  null,
+                  h('label', { className: 'dpf-label' }, t('imageSize')),
+                  h(
+                    'select',
+                    {
+                      className: 'dpf-select',
+                      value: imageSize,
+                      onChange: (event) => pickImageSize(event.target.value),
+                    },
+                    IMAGE_SIZES.map((value) =>
+                      h('option', { key: value, value }, value === 'auto' ? t('sizeAuto') : value),
+                    ),
+                  ),
+                ),
+                h(
+                  'div',
+                  null,
+                  h('label', { className: 'dpf-label' }, t('imageQuality')),
+                  h(
+                    'select',
+                    {
+                      className: 'dpf-select',
+                      value: imageQuality,
+                      onChange: (event) => pickImageQuality(event.target.value),
+                    },
+                    IMAGE_QUALITIES.map((value) =>
+                      h('option', { key: value, value }, value === 'auto' ? t('qualityAuto') : value.toUpperCase()),
+                    ),
+                  ),
+                ),
+              ),
+              ),
+              (error || notice) && h('div', { className: `dpf-error${notice ? ' dpf-warn' : ''}`, style: { marginBottom: 10 } }, error || notice),
+              h(
+                'div',
+                { className: 'dpf-actions' },
+                h(
+                  'button',
+                  {
+                    className: 'dpf-btn dpf-btn-primary',
+                    type: 'button',
+                    disabled: generating || !(editedPrompt.trim() || idea.trim() || (imageTab === 'edit' && (image || refShots.length > 0))),
+                    title: t('renderHint'),
+                    onClick: () => void renderOne(),
+                  },
+                  generating && h('span', { className: 'dpf-spin' }),
+                  generating ? t('generating') : imageTab === 'edit' ? t('renderEdit') : t('preview'),
+                ),
+              ),
+            ),
+            h(
+              'div',
+              { className: 'dpf-image-out' },
+              previewCard ||
+                h(
+                  'div',
+                  { className: 'dpf-empty' },
+                  emptyIcon,
+                  h('div', { className: 'dpf-empty-title' }, t('previewTitle')),
+                  h('div', { className: 'dpf-empty-hint' }, t('imageOutHint')),
+                ),
+            ),
+          );
+
+          // 小地图：把全部节点和视口四角一起算进包围盒，再等比缩到 152×98 的框里。
+          const canvasMap = (() => {
+            const nodes = canvas.nodes;
+            const el = canvasRef.current;
+            const vw = el && el.clientWidth ? el.clientWidth : 820;
+            const vh = el && el.clientHeight ? el.clientHeight : 560;
+            const view = canvas.view;
+            const pad = 8;
+            const viewX1 = -view.x / view.scale;
+            const viewY1 = -view.y / view.scale;
+            const viewX2 = (vw - view.x) / view.scale;
+            const viewY2 = (vh - view.y) / view.scale;
+            const xs = nodes.map((node) => node.x).concat(viewX1);
+            const ys = nodes.map((node) => node.y).concat(viewY1);
+            const xe = nodes.map((node) => node.x + node.w).concat(viewX2);
+            const ye = nodes.map((node) => node.y + node.h).concat(viewY2);
+            const minX = Math.min(...xs);
+            const minY = Math.min(...ys);
+            const maxX = Math.max(...xe);
+            const maxY = Math.max(...ye);
+            const k = Math.min((152 - pad * 2) / Math.max(1, maxX - minX), (98 - pad * 2) / Math.max(1, maxY - minY));
+            const ox = pad + (152 - pad * 2 - (maxX - minX) * k) / 2;
+            const oy = pad + (98 - pad * 2 - (maxY - minY) * k) / 2;
+            const place = (x, y) => ({ left: ox + (x - minX) * k, top: oy + (y - minY) * k });
+            return { k, place, origin: { left: ox - minX * k, top: oy - minY * k }, a: place(viewX1, viewY1), b: place(viewX2, viewY2) };
+          })();
+
+          const canvasBody = h(
+            'div',
+            {
+              className: 'dpf-canvas',
+              ref: canvasRef,
+              tabIndex: 0,
+              'data-panning': canvasPan.current ? '1' : undefined,
+              onPointerDownCapture: (event) => {
+                // 点到画布本体时把焦点拿过来，键盘快捷键与粘贴才知道往这儿走；
+                // 点到文字的输入框就别抢，否则没法打字。
+                const tag = event.target && event.target.tagName;
+                if (tag === 'TEXTAREA' || tag === 'INPUT') return;
+                // 面板里的按钮也别抢焦点，否则点完「搜索」就得再点回输入框才能打字。
+                if (event.target && event.target.closest && event.target.closest('.dpf-canvas-gal')) return;
+                canvasRef.current?.focus?.();
+              },
+              onPointerDown: (event) => {
+                const target = event.target;
+                // 端口优先：点在端口上时绝不能让容器开始平移，否则连线会被一起拖走。
+                if (target && target.closest && target.closest('.dpf-canvas-port')) {
+                  event.stopPropagation();
+                  return;
+                }
+                if (target === event.currentTarget || (target && target.classList && target.classList.contains('dpf-canvas-layer'))) {
+                  canvasPanStart(event);
+                }
+              },
+              onPointerMove: canvasPanMove,
+              onPointerUp: canvasPanEnd,
+              onPointerCancel: canvasPanEnd,
+              onDoubleClick: (event) => {
+                const target = event.target;
+                if (target === event.currentTarget || (target && target.classList && target.classList.contains('dpf-canvas-layer'))) {
+                  commitCanvas((prev) => ({ ...prev, view: { x: 0, y: 0, scale: 1 } }));
+                }
+              },
+              onDragOver: (event) => event.preventDefault(),
+              onDrop: (event) => {
+                event.preventDefault();
+                const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+                if (file) void canvasLoadFile(file);
+              },
+              onPaste: (event) => {
+                const items = Array.from((event.clipboardData && event.clipboardData.items) || []);
+                const hit = items.find((item) => item.kind === 'file' && String(item.type).startsWith('image/'));
+                if (!hit) return;
+                event.preventDefault();
+                void canvasLoadFile(hit.getAsFile());
+              },
+              onKeyDown: (event) => {
+                // 光标在画布文本节点或任何输入框里时，Delete/Backspace 是删字，不是删节点。
+                const tag = event.target && event.target.tagName;
+                if (tag === 'TEXTAREA' || tag === 'INPUT') return;
+                const mod = event.ctrlKey || event.metaKey;
+                const key = String(event.key || '').toLowerCase();
+                if (mod && key === 'z') {
+                  event.preventDefault();
+                  if (event.shiftKey) canvasRedo();
+                  else canvasUndo();
+                  return;
+                }
+                if (mod && key === 'y') {
+                  event.preventDefault();
+                  canvasRedo();
+                  return;
+                }
+                if (mod && key === 'a') {
+                  event.preventDefault();
+                  canvasSelectAll();
+                  return;
+                }
+                if (mod && key === 'c') {
+                  event.preventDefault();
+                  canvasCopy();
+                  return;
+                }
+                if (mod && key === 'v') {
+                  // 粘贴统一交给 window 上的 paste 监听处理：剪贴板里是图就落到画布，
+                  // 是节点就走粘贴。这里只拦一下别让浏览器把页面当成输入框。
+                  event.preventDefault();
+                  return;
+                }
+                if (key === 'escape') {
+                  setCanvasSel([]);
+                  return;
+                }
+                if ((event.key === 'Delete' || event.key === 'Backspace') && canvasSel.length > 0) {
+                  event.preventDefault();
+                  for (const id of canvasSel) removeCanvasNode(id);
+                }
+              },
+            },
+            h(
+              'div',
+              { className: 'dpf-canvas-tools' },
+              h(
+                'button',
+                { className: 'dpf-btn dpf-btn-small', type: 'button', onClick: () => canvasFile.current?.click() },
+                `＋ ${t('canvasAddImage')}`,
+              ),
+              h('input', {
+                type: 'file',
+                accept: 'image/*',
+                ref: canvasFile,
+                style: { display: 'none' },
+                onChange: (event) => {
+                  const file = event.target.files && event.target.files[0];
+                  event.target.value = '';
+                  if (file) void canvasLoadFile(file);
+                },
+              }),
+              h(
+                'button',
+                { className: 'dpf-btn dpf-btn-small', type: 'button', onClick: () => addCanvasNode('text') },
+                `＋ ${t('canvasText')}`,
+              ),
+              h(
+                'button',
+                {
+                  className: 'dpf-btn dpf-btn-small',
+                  type: 'button',
+                  'data-on': canvasGalOpen ? '1' : undefined,
+                  onClick: () => {
+                    const next = !canvasGalOpen;
+                    setCanvasGalOpen(next);
+                    // 第一次打开先把「全部」拉一页出来，省一次点击。
+                    if (next && canvasGalWorks.length === 0 && !canvasGalLoading) {
+                      void searchCanvasGallery(canvasGalQuery, canvasGalLib, canvasGalFilters);
+                    }
+                  },
+                },
+                `${canvasGalOpen ? '×' : '▤'} ${t('canvasGallery')}`,
+              ),
+              h(
+                'button',
+                {
+                  className: 'dpf-btn dpf-btn-small dpf-btn-primary',
+                  type: 'button',
+                  disabled: Boolean(canvasBusy),
+                  onClick: () => void canvasGenerate(),
+                },
+                canvasBusy ? t('canvasWorking') : t('canvasGenerate'),
+              ),
+              canvasSel.length > 0
+                ? h('span', { className: 'dpf-pill' }, `${t('canvasSelected')} ${canvasSel.length}`)
+                : null,
+              h('div', { className: 'dpf-canvas-sep' }),
+              h(
+                'button',
+                {
+                  className: 'dpf-btn dpf-btn-small',
+                  type: 'button',
+                  title: `${t('canvasUndo')} (Ctrl+Z)`,
+                  disabled: canvasDepth.undo === 0,
+                  onClick: canvasUndo,
+                },
+                '↶',
+              ),
+              h(
+                'button',
+                {
+                  className: 'dpf-btn dpf-btn-small',
+                  type: 'button',
+                  title: `${t('canvasRedo')} (Ctrl+Shift+Z)`,
+                  disabled: canvasDepth.redo === 0,
+                  onClick: canvasRedo,
+                },
+                '↷',
+              ),
+              h(
+                'button',
+                { className: 'dpf-btn dpf-btn-small', type: 'button', title: `${t('canvasCopy')} (Ctrl+C)`, onClick: canvasCopy },
+                t('canvasCopy'),
+              ),
+              h(
+                'button',
+                {
+                  className: 'dpf-btn dpf-btn-small',
+                  type: 'button',
+                  title: `${t('canvasPaste')} (Ctrl+V)`,
+                  disabled: canvasClip.current.length === 0,
+                  onClick: canvasPaste,
+                },
+                t('canvasPaste'),
+              ),
+              h(
+                'button',
+                { className: 'dpf-btn dpf-btn-small', type: 'button', title: `${t('canvasSelectAll')} (Ctrl+A)`, onClick: canvasSelectAll },
+                t('canvasSelectAll'),
+              ),
+              h('div', { className: 'dpf-spacer' }),
+              h('button', { className: 'dpf-btn dpf-btn-small', type: 'button', title: t('canvasExport'), onClick: canvasExport }, t('canvasExport')),
+              h(
+                'button',
+                { className: 'dpf-btn dpf-btn-small', type: 'button', title: t('canvasImport'), onClick: () => canvasImportFile.current?.click() },
+                t('canvasImport'),
+              ),
+              h('input', {
+                type: 'file',
+                accept: 'application/json,.json',
+                ref: canvasImportFile,
+                style: { display: 'none' },
+                onChange: (event) => {
+                  const file = event.target.files && event.target.files[0];
+                  event.target.value = '';
+                  if (file) void canvasImport(file);
+                },
+              }),
+              h('div', { className: 'dpf-canvas-sep' }),
+              h('button', { className: 'dpf-btn dpf-btn-small', type: 'button', title: t('zoomOut'), onClick: () => canvasZoomBy(1 / 1.2) }, '−'),
+              h('input', {
+                className: 'dpf-canvas-range',
+                type: 'range',
+                min: Math.round(CANVAS_MIN_SCALE * 100),
+                max: Math.round(CANVAS_MAX_SCALE * 100),
+                value: Math.round(canvas.view.scale * 100),
+                title: t('canvasZoom'),
+                onChange: (event) => canvasZoomTo(Number(event.target.value) / 100),
+              }),
+              h('button', { className: 'dpf-btn dpf-btn-small', type: 'button', title: t('zoomIn'), onClick: () => canvasZoomBy(1.2) }, '＋'),
+              h('button', { className: 'dpf-btn dpf-btn-small', type: 'button', onClick: canvasFit }, t('canvasFit')),
+              h(
+                'button',
+                { className: 'dpf-btn dpf-btn-small', type: 'button', title: t('canvasReset'), onClick: () => canvasZoomTo(1) },
+                `${Math.round(canvas.view.scale * 100)}%`,
+              ),
+              h(
+                'button',
+                {
+                  className: 'dpf-btn dpf-btn-small',
+                  type: 'button',
+                  onClick: () => {
+                    if (canvas.nodes.length === 0) return;
+                    if (!window.confirm(t('canvasClearAsk'))) return;
+                    commitCanvas(() => ({ nodes: [], edges: [], view: { x: 0, y: 0, scale: 1 } }));
+                    setCanvasSel([]);
+                  },
+                },
+                t('canvasClear'),
+              ),
+            ),
+            canvasGalOpen
+              ? h(
+                  'div',
+                  {
+                    className: 'dpf-canvas-gal',
+                    onPointerDown: (event) => event.stopPropagation(),
+                    onWheel: (event) => event.stopPropagation(),
+                  },
+                  h(
+                    'div',
+                    { className: 'dpf-canvas-gal-head' },
+                    h('b', null, t('canvasGallery')),
+                    h('span', { className: 'dpf-gallery-note', style: { margin: 0, flex: 1 } }, t('canvasGalleryHint')),
+                    h(
+                      'button',
+                      { className: 'dpf-canvas-x', type: 'button', title: t('canvasGallery'), onClick: () => setCanvasGalOpen(false) },
+                      '×',
+                    ),
+                  ),
+                  h(
+                    'div',
+                    { className: 'dpf-gallery-search' },
+                    h('input', {
+                      className: 'dpf-input',
+                      value: canvasGalQuery,
+                      maxLength: 40,
+                      placeholder: t('gallerySearch'),
+                      onChange: (event) => setCanvasGalQuery(event.target.value),
+                      onKeyDown: (event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          void searchCanvasGallery(canvasGalQuery, canvasGalLib, canvasGalFilters);
+                        }
+                      },
+                    }),
+                    h(
+                      'button',
+                      {
+                        className: 'dpf-btn dpf-btn-small',
+                        type: 'button',
+                        disabled: canvasGalLoading,
+                        onClick: () => void searchCanvasGallery(canvasGalQuery, canvasGalLib, canvasGalFilters),
+                      },
+                      canvasGalLoading ? t('galleryLoading') : '搜索',
+                    ),
+                  ),
+                  h(
+                    'div',
+                    { className: 'dpf-gallery-libs' },
+                    [
+                      ['auto', t('galleryAll')],
+                      ['pose', '姿势'],
+                      ['costume', '服装'],
+                      ['portrait', '人像'],
+                    ].map(([key, label]) =>
+                      h(
+                        'button',
+                        {
+                          key,
+                          type: 'button',
+                          className: 'dpf-chip',
+                          'data-on': canvasGalLib === key ? '1' : undefined,
+                          onClick: () => switchCanvasLib(key),
+                        },
+                        label,
+                      ),
+                    ),
+                  ),
+                  canvasKindsBox,
+                  canvasGalError && h('div', { className: 'dpf-gallery-note dpf-warn' }, canvasGalError),
+                  h(
+                    'div',
+                    { className: 'dpf-canvas-gal-grid' },
+                    canvasGalWorks.map((work) =>
+                      h(
+                        'button',
+                        {
+                          key: `${work.lib}:${work.id}`,
+                          type: 'button',
+                          className: 'dpf-gallery-card',
+                          title: `${work.name} · ${(work.tags || []).join('・')}`,
+                          onClick: () => void refToCanvas(work),
+                        },
+                        h('img', { src: work.thumbUrl, alt: '', loading: 'lazy' }),
+                        h('span', { className: 'dpf-gallery-name' }, work.name),
+                        h(
+                          'span',
+                          {
+                            className: 'dpf-gallery-canvas',
+                            role: 'button',
+                            title: t('canvasApplyNode'),
+                            onClick: (event) => {
+                              event.stopPropagation();
+                              void applyRefToNode(work);
+                            },
+                          },
+                          '⇢',
+                        ),
+                      ),
+                    ),
+                  ),
+                  canvasGalTotal > 0 &&
+                    h(
+                      'div',
+                      { className: 'dpf-gallery-more' },
+                      h('span', { className: 'dpf-gallery-note', style: { margin: 0 } }, `${canvasGalWorks.length} / ${canvasGalTotal}`),
+                      canvasGalWorks.length < canvasGalTotal &&
+                        h(
+                          'button',
+                          {
+                            type: 'button',
+                            className: 'dpf-chip',
+                            disabled: canvasGalLoading,
+                            onClick: () => searchCanvasGallery(canvasGalQuery, canvasGalLib, canvasGalFilters, canvasGalWorks),
+                          },
+                          canvasGalLoading
+                            ? t('galleryLoading')
+                            : `${t('galleryMore')} ${Math.min(24, canvasGalTotal - canvasGalWorks.length)}`,
+                        ),
+                    ),
+                )
+              : null,
+            h(
+              'div',
+              {
+                className: 'dpf-canvas-layer',
+                style: { transform: `translate(${canvas.view.x}px, ${canvas.view.y}px) scale(${canvas.view.scale})` },
+              },
+              h(
+                'svg',
+                { className: 'dpf-canvas-edge', style: { position: 'absolute', left: 0, top: 0, width: 1, height: 1, overflow: 'visible' } },
+                h(
+                  'defs',
+                  null,
+                  h(
+                    'marker',
+                    {
+                      id: 'dpf-canvas-arrow',
+                      viewBox: '0 0 10 10',
+                      refX: 8,
+                      refY: 5,
+                      markerWidth: 7,
+                      markerHeight: 7,
+                      orient: 'auto-start-reverse',
+                    },
+                    h('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: '#7aa7ff' }),
+                  ),
+                ),
+                canvas.edges.map((edge) => {
+                  const d = canvasEdgePath(edge);
+                  // 细线看得见、粗透明线点得到——否则想删连线得瞄准两个像素。
+                  return h(
+                    'g',
+                    { key: edge.id || `${edge.from}_${edge.to}` },
+                    h('path', { className: 'dpf-canvas-line', d, markerEnd: 'url(#dpf-canvas-arrow)' }),
+                    h('path', {
+                      className: 'dpf-canvas-hit',
+                      d,
+                      onPointerDown: (event) => event.stopPropagation(),
+                      onClick: () => edge.id && canvasRemoveEdge(edge.id),
+                    }),
+                  );
+                }),
+                // 预览线一直挂在 DOM 里，拖动时由 canvasPortDown 直接改它的 d。
+                h('path', { className: 'dpf-canvas-line dpf-canvas-live', ref: livePath, d: '' }),
+              ),
+              canvas.nodes.map(renderCanvasNode),
+            ),
+            canvasBox
+              ? h('div', {
+                  className: 'dpf-marquee',
+                  style: { left: canvasBox.left, top: canvasBox.top, width: canvasBox.width, height: canvasBox.height },
+                })
+              : null,
+            canvas.nodes.length === 0
+              ? h(
+                  'div',
+                  { className: 'dpf-canvas-empty' },
+                  h('div', { style: { fontSize: 15, color: 'var(--dsw-alias-text-primary,#ddd)' } }, t('canvasEmpty')),
+                  h('div', null, t('canvasEmptyHint')),
+                  h('div', null, t('canvasHint')),
+                  h('div', { style: { opacity: 0.7 } }, t('canvasMarqueeTip')),
+                )
+              : null,
+            h(
+              'div',
+              {
+                className: 'dpf-minimap',
+                'data-empty': canvas.nodes.length === 0 ? '1' : undefined,
+                title: t('canvasMinimap'),
+                onPointerDown: (event) => {
+                  const el = event.currentTarget;
+                  const rect = el.getBoundingClientRect();
+                  const px = event.clientX - rect.left;
+                  const py = event.clientY - rect.top;
+                  const view = canvasState.current.view;
+                  const layerEl = canvasRef.current;
+                  const vw = layerEl && layerEl.clientWidth ? layerEl.clientWidth : 820;
+                  const vh = layerEl && layerEl.clientHeight ? layerEl.clientHeight : 560;
+                  // 反解 place() 的线性映射，再换回视口中心的平移量。
+                  const wx = (px - canvasMap.origin.left) / canvasMap.k;
+                  const wy = (py - canvasMap.origin.top) / canvasMap.k;
+                  commitCanvas((prev) => ({
+                    ...prev,
+                    view: { ...prev.view, x: vw / 2 - wx * prev.view.scale, y: vh / 2 - wy * prev.view.scale },
+                  }));
+                },
+              },
+              canvas.nodes.map((node) => {
+                const at = canvasMap.place(node.x, node.y);
+                return h('div', {
+                  key: `mini_${node.id}`,
+                  className: 'dpf-minimap-node',
+                  'data-kind': node.kind,
+                  style: {
+                    left: at.left,
+                    top: at.top,
+                    width: Math.max(2, node.w * canvasMap.k),
+                    height: Math.max(2, node.h * canvasMap.k),
+                  },
+                });
+              }),
+              h('div', {
+                className: 'dpf-minimap-box',
+                style: {
+                  left: canvasMap.a.left,
+                  top: canvasMap.a.top,
+                  width: Math.max(3, canvasMap.b.left - canvasMap.a.left),
+                  height: Math.max(3, canvasMap.b.top - canvasMap.a.top),
+                },
+              }),
+            ),
+            canvasMsg.text ? h('div', { className: 'dpf-canvas-msg', 'data-bad': canvasMsg.bad ? '1' : undefined }, canvasMsg.text) : null,
+            h(
+              'div',
+              { className: 'dpf-canvas-foot' },
+              `${canvas.nodes.length} 节点 · ${Math.round(canvas.view.scale * 100)}%`,
+            ),
+          );
+
+
           const pickModel = (value) => {
             const found = modelOptions.find((item) => `${item.provider}\u0000${item.id}` === value);
             if (!found) {
@@ -2114,6 +4872,29 @@ window.__ModuleLoader__.load({
               ),
               h(
                 'div',
+                { className: 'dpf-pages' },
+                h(
+                  'button',
+                  { className: 'dpf-page', type: 'button', 'data-active': page === 'prompt' || undefined, onClick: () => setPage('prompt') },
+                  t('pagePrompt'),
+                ),
+                h(
+                  'button',
+                  { className: 'dpf-page', type: 'button', 'data-active': page === 'image' || undefined, onClick: () => setPage('image') },
+                  t('pageImage'),
+                ),
+                h(
+                  'button',
+                  { className: 'dpf-page', type: 'button', 'data-active': page === 'canvas' || undefined, onClick: () => { setPage('canvas'); setCanvasMsg({ text: '', bad: false }); } },
+                  t('pageCanvas'),
+                ),
+              ),
+              canvasView
+                ? canvasBody
+                : page === 'image'
+                ? imageBody
+                : h(
+                'div',
                 { className: 'dpf-body' },
                 h(
                   'div',
@@ -2152,132 +4933,6 @@ window.__ModuleLoader__.load({
                       onKeyDown: onKeyDownIdea,
                       onChange: (event) => setIdea(event.target.value),
                     }),
-                    h('input', {
-                      type: 'file',
-                      accept: 'image/*',
-                      ref: fileRef,
-                      style: { display: 'none' },
-                      onChange: (event) => {
-                        const file = event.target.files && event.target.files[0];
-                        event.target.value = '';
-                        if (file) void describeFile(file);
-                      },
-                    }),
-                    h('input', {
-                      type: 'file',
-                      accept: 'image/*',
-                      multiple: true,
-                      ref: extraRef,
-                      style: { display: 'none' },
-                      onChange: (event) => {
-                        const files = Array.from(event.target.files || []);
-                        event.target.value = '';
-                        for (const file of files.slice(0, 4)) void loadShot(file, true);
-                      },
-                    }),
-                    image
-                      ? h(
-                          'div',
-                          { className: 'dpf-thumb' },
-                          h('img', { src: image.data, alt: '' }),
-                          h(
-                            'div',
-                            { className: 'dpf-thumb-main' },
-                            h('div', { className: 'dpf-thumb-title' }, image.name || t('imageReady')),
-                            h('div', { className: 'dpf-thumb-sub' }, describing ? t('describing') : t('describeDone')),
-                          ),
-                          h('button', { className: 'dpf-btn dpf-btn-ghost dpf-btn-small', type: 'button', onClick: () => setImage(null) }, t('clear')),
-                        )
-                      : h(
-                          'div',
-                          {
-                            className: 'dpf-drop',
-                            'data-over': dragOver ? '1' : undefined,
-                            role: 'button',
-                            tabIndex: 0,
-                            title: t('describeHint'),
-                            onClick: pickImage,
-                            onKeyDown: (event) => {
-                              if (event.key === 'Enter' || event.key === ' ') {
-                                event.preventDefault();
-                                pickImage();
-                              }
-                            },
-                            onDragOver: (event) => {
-                              event.preventDefault();
-                              setDragOver(true);
-                            },
-                            onDragLeave: () => setDragOver(false),
-                            onDrop: onDropImage,
-                          },
-                          describing ? t('describing') : dragOver ? t('imageListening') : t('dropImage'),
-                        ),
-                    // 附加参考槽：主图之外最多再塞四张，生成时一起作为图像条件。
-                    h(
-                      'div',
-                      { className: 'dpf-refshots' },
-                      h(
-                        'div',
-                        { className: 'dpf-refshots-row' },
-                        refShots.map((shot, index) =>
-                          h(
-                            'div',
-                            { className: 'dpf-refshot', key: `${index}-${shot.name || ''}` },
-                            h('img', { src: shot.data, alt: '' }),
-                            h(
-                              'button',
-                              { type: 'button', className: 'dpf-refshot-x', onClick: () => removeRefShot(index), title: t('clear') },
-                              '×',
-                            ),
-                          ),
-                        ),
-                        refShots.length < 4 &&
-                          h(
-                            'button',
-                            {
-                              type: 'button',
-                              className: 'dpf-refshot-add',
-                              title: t('shotAdd'),
-                              onClick: () => extraRef.current?.click?.(),
-                              onDragOver: (event) => {
-                                event.preventDefault();
-                                setDragOver(true);
-                              },
-                              onDragLeave: () => setDragOver(false),
-                              onDrop: (event) => {
-                                event.preventDefault();
-                                setDragOver(false);
-                                const file = event.dataTransfer?.files?.[0];
-                                if (file) void loadShot(file, true);
-                              },
-                            },
-                            '+',
-                          ),
-                      ),
-                      h('div', { className: 'dpf-refshots-hint' }, t('shotHint')),
-                      refs.length > 0 &&
-                        h(
-                          'label',
-                          { className: 'dpf-check' },
-                          h('input', {
-                            type: 'checkbox',
-                            checked: usePoseRefs,
-                            onChange: (event) => setUsePoseRefs(event.target.checked),
-                          }),
-                          h('span', null, `${t('usePoseRefs')}（${refs.length}）`),
-                        ),
-                      h(
-                        'label',
-                        { className: 'dpf-check' },
-                        h('input', {
-                          type: 'checkbox',
-                          checked: neutralize,
-                          onChange: (event) => setNeutralize(event.target.checked),
-                        }),
-                        h('span', null, t('neutralize')),
-                      ),
-                    ),
-                    galleryBox,
                   ),
                   h(
                     'div',
@@ -2361,180 +5016,6 @@ window.__ModuleLoader__.load({
                         [1, 2, 3].map((value) => h('option', { key: value, value }, String(value))),
                       ),
                     ),
-                    h(
-                      'div',
-                      { className: 'dpf-grid2', style: { marginTop: 8 }, title: t('imageModelHint') },
-                      h(
-                        'div',
-                        null,
-                        h('label', { className: 'dpf-label' }, t('imageSource')),
-                        h(
-                          'div',
-                          { style: { display: 'flex', gap: 6, alignItems: 'center' } },
-                          h(
-                            'select',
-                            {
-                              className: 'dpf-select',
-                              value: currentSource,
-                              disabled: sourceOptions.length === 0,
-                              onChange: (event) => {
-                                const raw = event.target.value;
-                                if (raw.startsWith('host:')) {
-                                  setSource('host');
-                                  pickImageChannel(raw.slice(5));
-                                  return;
-                                }
-                                setSource(raw);
-                                setImageModel((targets.find((item) => item.id === raw) || {}).models?.[0] || '');
-                              },
-                            },
-                            sourceOptions.length === 0
-                              ? [h('option', { key: 'none', value: '' }, t('sourceEmpty'))]
-                              : sourceOptions.map((item) => h('option', { key: item.id, value: item.id }, item.label)),
-                          ),
-                          h(
-                            'button',
-                            {
-                              type: 'button',
-                              className: 'dpf-icon-btn',
-                              title: t('targetAdd'),
-                              onClick: () => {
-                                setTargetOpen((value) => !value);
-                                setTargetMsg('');
-                              },
-                            },
-                            targetOpen ? '×' : '+',
-                          ),
-                        ),
-                      ),
-                      h(
-                        'div',
-                        null,
-                        h('label', { className: 'dpf-label' }, t('imageModel')),
-                        h(
-                          'select',
-                          {
-                            className: 'dpf-select',
-                            value: effectiveImageModel,
-                            disabled: imageModelChoices.length === 0,
-                            onChange: (event) => pickImageModel(event.target.value),
-                          },
-                          imageModelChoices.length === 0
-                            ? [h('option', { key: 'none', value: '' }, '—')]
-                            : imageModelChoices.map((item) => h('option', { key: item, value: item }, item)),
-                        ),
-                      ),
-                    ),
-                    targetOpen &&
-                      h(
-                        'div',
-                        { className: 'dpf-target-form' },
-                        h('input', {
-                          className: 'dpf-input',
-                          placeholder: t('targetName'),
-                          value: targetDraft.label,
-                          maxLength: 60,
-                          onChange: (event) => setTargetDraft({ ...targetDraft, label: event.target.value }),
-                        }),
-                        h('input', {
-                          className: 'dpf-input',
-                          placeholder: 'https://api.openai.com/v1',
-                          value: targetDraft.baseUrl,
-                          spellCheck: false,
-                          onChange: (event) => setTargetDraft({ ...targetDraft, baseUrl: event.target.value }),
-                        }),
-                        h('input', {
-                          className: 'dpf-input',
-                          type: 'password',
-                          placeholder: t('targetKey'),
-                          value: targetDraft.apiKey,
-                          onChange: (event) => setTargetDraft({ ...targetDraft, apiKey: event.target.value }),
-                        }),
-                        h('input', {
-                          className: 'dpf-input',
-                          placeholder: 'gpt-image-1, flux-1.1-pro',
-                          value: targetDraft.models,
-                          spellCheck: false,
-                          onChange: (event) => setTargetDraft({ ...targetDraft, models: event.target.value }),
-                        }),
-                        h(
-                          'div',
-                          { className: 'dpf-target-actions' },
-                          h(
-                            'button',
-                            {
-                              type: 'button',
-                              className: 'dpf-btn',
-                              style: { padding: '5px 10px', fontSize: 12 },
-                              disabled: targetBusy,
-                              onClick: () => void testTarget(),
-                            },
-                            targetBusy ? t('targetTesting') : t('targetTest'),
-                          ),
-                          h(
-                            'button',
-                            {
-                              type: 'button',
-                              className: 'dpf-btn',
-                              style: { padding: '5px 10px', fontSize: 12 },
-                              disabled: targetBusy,
-                              onClick: () => void saveTarget(),
-                            },
-                            t('targetSave'),
-                          ),
-                          activeTarget &&
-                            h(
-                              'button',
-                              {
-                                type: 'button',
-                                className: 'dpf-btn',
-                                style: { padding: '5px 10px', fontSize: 12 },
-                                onClick: () => void removeTarget(activeTarget.id),
-                              },
-                              t('targetRemove'),
-                            ),
-                        ),
-                        targetMsg &&
-                          h('div', { className: `dpf-target-msg${targetBad ? ' is-bad' : ''}` }, targetMsg),
-                        h('div', { className: 'dpf-target-msg' }, t('targetHint')),
-                      ),
-                    imageModelChoices.length > 0 &&
-                      h(
-                        'div',
-                        { className: 'dpf-grid2', style: { marginTop: 8 } },
-                        h(
-                          'div',
-                          null,
-                          h('label', { className: 'dpf-label' }, t('imageSize')),
-                          h(
-                            'select',
-                            {
-                              className: 'dpf-select',
-                              value: imageSize,
-                              onChange: (event) => pickImageSize(event.target.value),
-                            },
-                            IMAGE_SIZES.map((value) =>
-                              h('option', { key: value, value }, value === 'auto' ? t('sizeAuto') : value),
-                            ),
-                          ),
-                        ),
-                        h(
-                          'div',
-                          null,
-                          h('label', { className: 'dpf-label' }, t('imageQuality')),
-                          h(
-                            'select',
-                            {
-                              className: 'dpf-select',
-                              value: imageQuality,
-                              onChange: (event) => pickImageQuality(event.target.value),
-                            },
-                            IMAGE_QUALITIES.map((value) =>
-                              h('option', { key: value, value }, value === 'auto' ? t('qualityAuto') : value.toUpperCase()),
-                            ),
-                          ),
-                        ),
-                      ),
                   ),
                   h(
                     'div',
@@ -2587,14 +5068,8 @@ window.__ModuleLoader__.load({
                     running && h('button', { className: 'dpf-btn', type: 'button', onClick: stop }, t('stop')),
                     h(
                       'button',
-                      {
-                        className: 'dpf-btn',
-                        type: 'button',
-                        disabled: generating,
-                        title: t('renderHint'),
-                        onClick: () => void renderOne(),
-                      },
-                      generating ? t('generating') : image ? t('renderEdit') : t('preview'),
+                      { className: 'dpf-btn', type: 'button', title: t('imageGoHint'), onClick: () => setPage('image') },
+                      `${t('pageImage')} →`,
                     ),
                   ),
                   !modelReady && !catalogLoading && h('div', { className: 'dpf-error dpf-warn', style: { marginTop: 10 } }, catalogError || t('needModel')),
@@ -2603,9 +5078,6 @@ window.__ModuleLoader__.load({
                   'div',
                   { className: 'dpf-right' },
                   !result &&
-                    preview.length === 0 &&
-                    !previewError &&
-                    !generating &&
                     h(
                       'div',
                       { className: 'dpf-empty' },
@@ -2614,15 +5086,8 @@ window.__ModuleLoader__.load({
                       h('div', { className: 'dpf-empty-hint' }, t('resultEmptyHint')),
                       h(
                         'button',
-                        {
-                          className: 'dpf-btn dpf-btn-primary',
-                          type: 'button',
-                          disabled: generating || !(editedPrompt.trim() || idea.trim() || refs.length > 0),
-                          title: t('renderHint'),
-                          onClick: () => void renderOne(),
-                          style: { marginTop: 16 },
-                        },
-                        generating ? t('generating') : image ? t('renderEdit') : t('preview'),
+                        { className: 'dpf-btn', type: 'button', onClick: () => setPage('image'), style: { marginTop: 16 } },
+                        `${t('pageImage')} →`,
                       ),
                     ),
                   result &&
@@ -2692,53 +5157,6 @@ window.__ModuleLoader__.load({
                         result.elapsedMs ? h('span', { className: 'dpf-pill' }, `${t('elapsed')} ${(result.elapsedMs / 1000).toFixed(1)}s`) : null,
                         result.model ? h('span', { className: 'dpf-pill' }, result.model) : null,
                       ),
-                    ),
-                  (preview.length > 0 || previewError || generating) &&
-                    h(
-                      'div',
-                      { className: 'dpf-card' },
-                      h(
-                        'div',
-                        { className: 'dpf-card-head' },
-                        h('span', { className: 'dpf-card-title' }, t('previewTitle')),
-                        h('div', { className: 'dpf-spacer' }),
-                        h(
-                          'button',
-                          { className: 'dpf-btn dpf-btn-ghost dpf-btn-small', type: 'button', disabled: generating, onClick: () => void renderOne() },
-                          generating ? t('generating') : t('regenerate'),
-                        ),
-                      ),
-                      previewError ? h('div', { className: 'dpf-error' }, previewError) : null,
-                      generating && preview.length === 0 ? h('div', { className: 'dpf-preview-empty' }, t('generating')) : null,
-                      previewStale && preview.length > 0
-                        ? h('div', { className: 'dpf-stale' }, t('staleTag'))
-                        : null,
-                      preview.length > 0 &&
-                        h(
-                          'div',
-                          { className: previewStale ? 'dpf-preview is-stale' : 'dpf-preview' },
-                          preview.map((shot, index) =>
-                            h(
-                              'div',
-                              { className: 'dpf-shot', key: index },
-                              h('img', {
-                                src: `data:${shot.mime};base64,${shot.b64}`,
-                                alt: '',
-                                title: t('zoomHint'),
-                                onClick: () => openLightbox(shot),
-                              }),
-                              h(
-                                'button',
-                                {
-                                  className: 'dpf-shot-save',
-                                  type: 'button',
-                                  onClick: () => saveShot(shot, index),
-                                },
-                                t('save'),
-                              ),
-                            ),
-                          ),
-                        ),
                     ),
                   result?.negative &&
                     h(
@@ -2871,7 +5289,7 @@ window.__ModuleLoader__.load({
                   },
                 },
                 h('img', {
-                  src: `data:${lightbox.mime};base64,${lightbox.b64}`,
+                  src: lightbox.url || `data:${lightbox.mime};base64,${lightbox.b64}`,
                   alt: '',
                   'data-zoomed': zoom.scale > 1 ? '1' : '0',
                   draggable: false,

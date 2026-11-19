@@ -1,8 +1,8 @@
 {
-  "name": "dsh-image-prompt-forge",
-  "version": "1.3.5",
+  "name": "dsh-drawcraft",
+  "version": "1.9.7",
   "type": "module",
-  "description": "把想法拆成可直接执行的生图提示词：六种方言、参考图库（姿势/服装/人像）、粘贴板导入与图生图，并支持自带 OpenAI 兼容的生图端点（密钥只存本机）。",
+  "description": "绘语：把想法拆成可直接执行的生图提示词：六种方言、参考图库（姿势/服装/人像）、粘贴板导入与图生图、无限画布上串起多张图再出图，并支持自带 OpenAI 兼容的生图端点（密钥只存本机）。",
   "license": "MIT",
   "author": "Vhow123",
   "keywords": [
@@ -20,7 +20,9 @@
     "controlnet",
     "reference-gallery",
     "bring-your-own-endpoint",
-    "image-edits"
+    "image-edits",
+    "infinite-canvas",
+    "node-canvas"
   ],
   "repository": {
     "type": "git",

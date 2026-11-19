@@ -165,22 +165,22 @@ async function call(path, body) {
 }
 
 test('exposes the plugin identity and services it needs', { skip }, () => {
-  assert.equal(mod.name, 'prompt-forge');
+  assert.equal(mod.name, 'drawcraft');
   assert.deepEqual(mod.inject, ['webServer', 'llm']);
   assert.equal(typeof mod.apply, 'function');
 });
 
 test('registers every route and all agent tools', { skip }, () => {
   assert.deepEqual([...routes.keys()].sort(), [
-    '/api/prompt-forge/catalog',
-    '/api/prompt-forge/config',
-    '/api/prompt-forge/describe',
-    '/api/prompt-forge/gallery',
-    '/api/prompt-forge/optimize',
-    '/api/prompt-forge/patch',
-    '/api/prompt-forge/render',
-    '/api/prompt-forge/stop',
-    '/api/prompt-forge/targets',
+    '/api/drawcraft/catalog',
+    '/api/drawcraft/config',
+    '/api/drawcraft/describe',
+    '/api/drawcraft/gallery',
+    '/api/drawcraft/optimize',
+    '/api/drawcraft/patch',
+    '/api/drawcraft/render',
+    '/api/drawcraft/stop',
+    '/api/drawcraft/targets',
   ]);
   assert.deepEqual([...tools.keys()], [
     'optimize_image_prompt',
@@ -190,7 +190,7 @@ test('registers every route and all agent tools', { skip }, () => {
 });
 
 test('catalog route reports models and the prompt catalog', { skip }, async () => {
-  const { status, body } = await call('/api/prompt-forge/catalog', {});
+  const { status, body } = await call('/api/drawcraft/catalog', {});
   assert.equal(status, 200);
   assert.equal(body.ok, true);
   assert.equal(body.groups.length, 1);
@@ -200,7 +200,7 @@ test('catalog route reports models and the prompt catalog', { skip }, async () =
 });
 
 test('gallery route exposes library metadata without touching the network', { skip }, async () => {
-  const { status, body } = await call('/api/prompt-forge/gallery', { action: 'libraries' });
+  const { status, body } = await call('/api/drawcraft/gallery', { action: 'libraries' });
   assert.equal(status, 200);
   assert.equal(body.ok, true);
   // 种类维度决定面板上能筛什么；姿势库三个维度都不能少。
@@ -210,7 +210,7 @@ test('gallery route exposes library metadata without touching the network', { sk
 });
 
 test('image targets never echo the api key back to the panel', { skip }, async () => {
-  const saved = await call('/api/prompt-forge/targets', {
+  const saved = await call('/api/drawcraft/targets', {
     action: 'save',
     target: { label: 'demo-target', baseUrl: 'http://127.0.0.1:9/v1', apiKey: 'sk-secret-value-1234', models: ['demo-image'] },
   });
@@ -223,13 +223,13 @@ test('image targets never echo the api key back to the panel', { skip }, async (
   assert.equal(first.hasKey, true);
   assert.deepEqual(first.models, ['demo-image']);
 
-  const removed = await call('/api/prompt-forge/targets', { action: 'remove', id: first.id });
+  const removed = await call('/api/drawcraft/targets', { action: 'remove', id: first.id });
   assert.equal(removed.body.ok, true);
   assert.equal(removed.body.targets.some((item) => item.id === first.id), false);
 });
 
 test('render route refuses an unknown target instead of guessing', { skip }, async () => {
-  const { status, body } = await call('/api/prompt-forge/render', { targetId: 'nope', prompt: 'x' });
+  const { status, body } = await call('/api/drawcraft/render', { targetId: 'nope', prompt: 'x' });
   assert.equal(status, 200);
   assert.equal(body.ok, false);
   assert.equal(body.code, 'target-missing');
@@ -250,13 +250,13 @@ test('render relays to the configured endpoint', { skip }, async () => {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address();
   try {
-    const saved = await call('/api/prompt-forge/targets', {
+    const saved = await call('/api/drawcraft/targets', {
       action: 'save',
       target: { label: 'relay-demo', baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: 'sk-relay', models: ['m1'] },
     });
     const id = (saved.body.targets.find((item) => item.label === 'relay-demo') || {}).id;
     assert.ok(id, 'target must exist before relaying');
-    const out = await call('/api/prompt-forge/render', { targetId: id, prompt: 'a paper boat', mode: 'text' });
+    const out = await call('/api/drawcraft/render', { targetId: id, prompt: 'a paper boat', mode: 'text' });
     assert.equal(out.body.ok, true);
     assert.equal(out.body.images[0].b64, 'aGVsbG8=');
     assert.equal(seen.length, 1);
@@ -284,12 +284,12 @@ test('render sends a multipart edit when a subject image is attached', { skip },
   const { port } = server.address();
   const px = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
   try {
-    const saved = await call('/api/prompt-forge/targets', {
+    const saved = await call('/api/drawcraft/targets', {
       action: 'save',
       target: { label: 'edit-demo', baseUrl: `http://127.0.0.1:${port}/v1`, models: ['m1'] },
     });
     const id = (saved.body.targets.find((item) => item.label === 'edit-demo') || {}).id;
-    const out = await call('/api/prompt-forge/render', { targetId: id, prompt: 'keep her, change the pose', mode: 'edit', image: px, images: [px] });
+    const out = await call('/api/drawcraft/render', { targetId: id, prompt: 'keep her, change the pose', mode: 'edit', image: px, images: [px] });
     assert.equal(out.body.ok, true);
     assert.equal(seen[0].url, '/v1/images/edits');
     assert.ok(seen[0].type.startsWith('multipart/form-data'), 'edit must be multipart');
@@ -301,7 +301,7 @@ test('render sends a multipart edit when a subject image is attached', { skip },
 });
 
 test('optimize rewrites midjourney switches instead of trusting the model', { skip }, async () => {
-  const { body } = await call('/api/prompt-forge/optimize', {
+  const { body } = await call('/api/drawcraft/optimize', {
     provider: 'demo',
     model: 'demo-model',
     idea: 'a diving helmet on the beach',
@@ -320,14 +320,14 @@ test('optimize rewrites midjourney switches instead of trusting the model', { sk
 });
 
 test('a successful run with remember persists provider and model', { skip }, () => {
-  const saved = JSON.parse(readFileSync(join(home, '.dsh', 'prompt-forge.json'), 'utf8'));
+  const saved = JSON.parse(readFileSync(join(home, '.dsh', 'drawcraft.json'), 'utf8'));
   assert.equal(saved.provider, 'demo');
   assert.equal(saved.model, 'demo-model');
   assert.equal(saved.dialect, 'midjourney');
 });
 
 test('non-midjourney dialects never keep midjourney switches', { skip }, async () => {
-  const { body } = await call('/api/prompt-forge/optimize', {
+  const { body } = await call('/api/drawcraft/optimize', {
     provider: 'demo',
     model: 'demo-model',
     idea: 'a diving helmet',
@@ -337,13 +337,13 @@ test('non-midjourney dialects never keep midjourney switches', { skip }, async (
 });
 
 test('optimize rejects an empty idea without calling the model', { skip }, async () => {
-  const { body } = await call('/api/prompt-forge/optimize', { provider: 'demo', model: 'demo-model', idea: '  ' });
+  const { body } = await call('/api/drawcraft/optimize', { provider: 'demo', model: 'demo-model', idea: '  ' });
   assert.equal(body.ok, false);
   assert.equal(body.code, 'IDEA_REQUIRED');
 });
 
 test('config route reads back what the last run saved', { skip }, async () => {
-  const { body } = await call('/api/prompt-forge/config', { action: 'read' });
+  const { body } = await call('/api/drawcraft/config', { action: 'read' });
   assert.equal(body.ok, true);
   assert.equal(body.config.provider, 'demo');
 });
@@ -357,7 +357,7 @@ test('the agent tool renders a readable report', { skip }, async () => {
 });
 
 test('describe admits the upload and forwards it as an image block', { skip }, async () => {
-  const { body } = await call('/api/prompt-forge/describe', {
+  const { body } = await call('/api/drawcraft/describe', {
     provider: 'demo',
     model: 'demo-model',
     dialect: 'natural-en',
@@ -369,13 +369,13 @@ test('describe admits the upload and forwards it as an image block', { skip }, a
 });
 
 test('describe reports a missing image instead of calling the model', { skip }, async () => {
-  const { body } = await call('/api/prompt-forge/describe', { provider: 'demo', model: 'demo-model', image: { data: '' } });
+  const { body } = await call('/api/drawcraft/describe', { provider: 'demo', model: 'demo-model', image: { data: '' } });
   assert.equal(body.ok, false);
   assert.equal(body.code, 'IMAGE_REQUIRED');
 });
 
 test('patch rewrites the prompt and echoes the instruction', { skip }, async () => {
-  const { body } = await call('/api/prompt-forge/patch', {
+  const { body } = await call('/api/drawcraft/patch', {
     provider: 'demo',
     model: 'demo-model',
     prompt: 'a brass diving helmet',
@@ -390,7 +390,7 @@ test('patch rewrites the prompt and echoes the instruction', { skip }, async () 
 });
 
 test('patch refuses to run without an instruction', { skip }, async () => {
-  const { body } = await call('/api/prompt-forge/patch', { provider: 'demo', model: 'demo-model', prompt: 'something' });
+  const { body } = await call('/api/drawcraft/patch', { provider: 'demo', model: 'demo-model', prompt: 'something' });
   assert.equal(body.ok, false);
   assert.equal(body.code, 'INSTRUCTION_REQUIRED');
 });

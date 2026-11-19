@@ -1,16 +1,16 @@
 /**
- * dsh-image-prompt-forge host half.
+ * dsh-drawcraft host half.
  *
  * Registers loopback-only JSON routes for the browser panel and two agent tools,
  * all of them delegating the actual prompt work to engine.js:
- *   POST /api/prompt-forge/catalog  → styles/dialects/modes + live model list + saved config
- *   POST /api/prompt-forge/optimize → one structured optimization run (idea → prompt)
- *   POST /api/prompt-forge/describe → one image → prompt run (needs a vision model)
- *   POST /api/prompt-forge/patch    → one-line delta edit applied to an existing result
- *   POST /api/prompt-forge/stop     → abort a running optimization by runId
- *   POST /api/prompt-forge/config   → persist the default provider/model and last-used options
+ *   POST /api/drawcraft/catalog  → styles/dialects/modes + live model list + saved config
+ *   POST /api/drawcraft/optimize → one structured optimization run (idea → prompt)
+ *   POST /api/drawcraft/describe → one image → prompt run (needs a vision model)
+ *   POST /api/drawcraft/patch    → one-line delta edit applied to an existing result
+ *   POST /api/drawcraft/stop     → abort a running optimization by runId
+ *   POST /api/drawcraft/config   → persist the default provider/model and last-used options
  *
- * The saved config lives in ~/.dsh/prompt-forge.json so the agent tool can run
+ * The saved config lives in ~/.dsh/drawcraft.json so the agent tool can run
  * without the panel being open.
  */
 import { appendFileSync } from 'node:fs';
@@ -41,13 +41,13 @@ import {
 
 export { CATALOG, runDescribe, runOptimize, runPatch } from './engine.js';
 
-export const name = 'prompt-forge';
+export const name = 'drawcraft';
 export const inject = ['webServer', 'llm'];
 
-const API = '/api/prompt-forge';
+const API = '/api/drawcraft';
 const CONFIG_VERSION = 1;
 
-const TRACE_PATH = join(homedir(), '.dsh', 'prompt-forge-load.log');
+const TRACE_PATH = join(homedir(), '.dsh', 'drawcraft-load.log');
 
 function trace(line) {
   try {
@@ -291,7 +291,7 @@ function defaults() {
 }
 
 function configPath() {
-  return join(homedir(), '.dsh', 'prompt-forge.json');
+  return join(homedir(), '.dsh', 'drawcraft.json');
 }
 
 function pickConfig(value) {
@@ -342,7 +342,7 @@ async function writeConfig(value) {
 const TARGETS_VERSION = 1;
 
 function targetsPath() {
-  return join(homedir(), '.dsh', 'prompt-forge-targets.json');
+  return join(homedir(), '.dsh', 'drawcraft-targets.json');
 }
 
 function slug(text) {
@@ -553,7 +553,7 @@ function formatToolResult(result) {
     result.variants.forEach((variant, index) => lines.push(`${index + 1}. ${variant}`));
   }
   if (result.notes) lines.push('', `【建议】${result.notes}`);
-  lines.push('', `（由提示词工坊 · ${result.model} 生成）`);
+  lines.push('', `（由绘语 · ${result.model} 生成）`);
   return lines.join('\n');
 }
 
@@ -624,7 +624,7 @@ function registerTools(ctx, llm, resolveConfig) {
       async execute(args, exec) {
         const config = await resolveConfig();
         if (!config.provider || !config.model) {
-          throw new Error('提示词工坊还没有选择优化用的对话模型：请在侧边栏打开「提示词工坊」面板，在顶部选择 provider 与 model 并保存。');
+          throw new Error('绘语还没有选择优化用的对话模型：请在侧边栏打开「绘语」面板，在顶部选择 provider 与 model 并保存。');
         }
         const referenceBlock = args.refs ? await resolveReferenceBlock(args.refs) : '';
         const result = await runOptimize(
@@ -693,7 +693,7 @@ function registerTools(ctx, llm, resolveConfig) {
       async execute(args, exec) {
         const config = await resolveConfig();
         if (!config.provider || !config.model) {
-          throw new Error('提示词工坊还没有选择优化用的对话模型：请在侧边栏打开「提示词工坊」面板，在顶部选择 provider 与 model 并保存。');
+          throw new Error('绘语还没有选择优化用的对话模型：请在侧边栏打开「绘语」面板，在顶部选择 provider 与 model 并保存。');
         }
         const result = await runPatch(
           llm,
@@ -1096,13 +1096,13 @@ export function apply(ctx) {
       activeRuns.clear();
       for (const dispose of disposers.reverse()) dispose();
     };
-  }, 'prompt-forge: routes');
+  }, 'drawcraft: routes');
 
   ctx.inject(['tools'], (toolCtx) => {
     toolCtx.effect(() => {
       const disposeTool = registerTools(toolCtx, ctx.llm, readConfig);
       return () => disposeTool();
-    }, 'prompt-forge: agent tool');
+    }, 'drawcraft: agent tool');
   });
 
   function beginRun(runId) {

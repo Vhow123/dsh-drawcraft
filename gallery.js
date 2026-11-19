@@ -1,7 +1,7 @@
 /**
- * dsh-image-prompt-forge · gallery bridge
+ * dsh-drawcraft · gallery bridge
  *
- * 把 ai-pose-gallery-zh（6,162 条中文参考数据）接进提示词工坊，但不克隆那个
+ * 把 ai-pose-gallery-zh（6,162 条中文参考数据）接进绘语，但不克隆那个
  * 1.16 GB 仓库：三份索引 JSON（约 2.2 MB）首次使用时拉到本地缓存，之后完全离线；
  * 图片一律走 jsDelivr CDN 按需取单张，钉在固定 commit 上避免上游推送导致链接漂移。
  *
@@ -18,7 +18,7 @@ const UPSTREAM = 'https://raw.githubusercontent.com/anhao/ai-pose-gallery-zh/mai
 export const GALLERY_CDN = `https://cdn.jsdelivr.net/gh/anhao/ai-pose-gallery-zh@${GALLERY_SHA}`;
 export const GALLERY_SITE = 'https://ai-pose-gallery.anhao.app';
 
-const CACHE_DIR = join(homedir(), '.dsh', 'cache', 'prompt-forge-gallery');
+const CACHE_DIR = join(homedir(), '.dsh', 'cache', 'drawcraft-gallery');
 
 /** 三个库的字段映射：name 是主名称，tags 参与展示，kinds 是可筛选的种类维度。 */
 export const GALLERY_LIBS = {
