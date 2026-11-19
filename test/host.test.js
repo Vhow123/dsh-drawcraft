@@ -170,16 +170,21 @@ test('exposes the plugin identity and services it needs', { skip }, () => {
   assert.equal(typeof mod.apply, 'function');
 });
 
-test('registers every route and both agent tools', { skip }, () => {
+test('registers every route and all agent tools', { skip }, () => {
   assert.deepEqual([...routes.keys()].sort(), [
     '/api/prompt-forge/catalog',
     '/api/prompt-forge/config',
     '/api/prompt-forge/describe',
+    '/api/prompt-forge/gallery',
     '/api/prompt-forge/optimize',
     '/api/prompt-forge/patch',
     '/api/prompt-forge/stop',
   ]);
-  assert.deepEqual([...tools.keys()], ['optimize_image_prompt', 'patch_image_prompt']);
+  assert.deepEqual([...tools.keys()], [
+    'optimize_image_prompt',
+    'patch_image_prompt',
+    'search_reference_gallery',
+  ]);
 });
 
 test('catalog route reports models and the prompt catalog', { skip }, async () => {
@@ -190,6 +195,16 @@ test('catalog route reports models and the prompt catalog', { skip }, async () =
   assert.equal(body.groups[0].models[0].id, 'demo-model');
   assert.equal(body.catalog.styles.length, 18);
   assert.equal(body.catalog.dialects.length, 6);
+});
+
+test('gallery route exposes library metadata without touching the network', { skip }, async () => {
+  const { status, body } = await call('/api/prompt-forge/gallery', { action: 'libraries' });
+  assert.equal(status, 200);
+  assert.equal(body.ok, true);
+  // 种类维度决定面板上能筛什么；姿势库三个维度都不能少。
+  assert.deepEqual(body.libs.pose.kinds, ['体系', '角度', '分类']);
+  assert.equal(body.libs.pose.depth, true);
+  assert.deepEqual(body.libs.portrait.kinds, ['分区', '发长', '发型名称']);
 });
 
 test('optimize rewrites midjourney switches instead of trusting the model', { skip }, async () => {

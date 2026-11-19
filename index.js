@@ -29,6 +29,15 @@ import {
   runOptimize,
   runPatch,
 } from './engine.js';
+import {
+  buildReferenceBlock,
+  findEntry,
+  GALLERY_LIBS,
+  listKinds,
+  parseKindFilters,
+  randomGallery,
+  searchGallery,
+} from './gallery.js';
 
 export { CATALOG, runDescribe, runOptimize, runPatch } from './engine.js';
 
@@ -194,6 +203,38 @@ function route(path, handler) {
       }
     },
   };
+}
+
+// ── reference gallery ────────────────────────────────────────────────────────
+
+/**
+ * 面板传 refs（`[{lib,id}]` 或 `"pose:ID"` 字符串），换成交给引擎的中文描述块。
+ * 任何失败都降级成空串：图库不可用不该拖垮提示词优化。
+ */
+async function resolveReferenceBlock(refs) {
+  const list = typeof refs === 'string' ? refs.split(/[,;\s]+/).filter(Boolean) : refs;
+  if (!Array.isArray(list) || list.length === 0) return '';
+  const entries = [];
+  for (const ref of list.slice(0, 8)) {
+    let lib = 'auto';
+    let id = '';
+    if (typeof ref === 'string') {
+      const cut = ref.indexOf(':');
+      if (cut > 0) {
+        lib = ref.slice(0, cut);
+        id = ref.slice(cut + 1);
+      } else {
+        id = ref;
+      }
+    } else if (ref && typeof ref === 'object') {
+      lib = typeof ref.lib === 'string' ? ref.lib : 'auto';
+      id = String(ref.id ?? '');
+    }
+    if (!id) continue;
+    const entry = await findEntry(id, lib).catch(() => null);
+    if (entry) entries.push(entry);
+  }
+  return buildReferenceBlock(entries);
 }
 
 // ── model catalog ────────────────────────────────────────────────────────────
@@ -373,6 +414,11 @@ function registerTools(ctx, llm, resolveConfig) {
           type: 'integer',
           description: 'How many alternate directions to include, 1 to 3. Defaults to 1.',
         },
+        refs: {
+          type: 'string',
+          description:
+            'IDs returned by search_reference_gallery, comma separated and library-prefixed, for example "pose:full_sexy_P070_side,costume:SPR-0001". Their Chinese descriptions are then treated as binding facts for the posture, garment or hair fields.',
+        },
       },
       output: {
         schema: { type: 'string' },
@@ -383,6 +429,7 @@ function registerTools(ctx, llm, resolveConfig) {
         if (!config.provider || !config.model) {
           throw new Error('提示词工坊还没有选择优化用的对话模型：请在侧边栏打开「提示词工坊」面板，在顶部选择 provider 与 model 并保存。');
         }
+        const referenceBlock = args.refs ? await resolveReferenceBlock(args.refs) : '';
         const result = await runOptimize(
           llm,
           {
@@ -396,6 +443,7 @@ function registerTools(ctx, llm, resolveConfig) {
             mode: args.mode || config.mode,
             negative: args.negative || config.mustAvoid,
             candidates: args.count ?? config.candidates,
+            referenceBlock,
           },
           exec?.signal,
         );
@@ -468,7 +516,99 @@ function registerTools(ctx, llm, resolveConfig) {
       },
     }),
   );
+  const disposeGallery = ctx.tools.register(
+    defineTool({
+      name: 'search_reference_gallery',
+      description: [
+        'Search a curated Chinese reference library (6,162 entries) for body poses, full outfits and portrait/hair references, and get ready-to-use image URLs.',
+        '',
+        'Use this before optimize_image_prompt whenever the user asks for a specific body pose, a whole outfit, or a hairstyle: the library returns the exact Chinese description plus a CDN image URL per entry, so the resulting prompt does not have to invent anatomy or garment details.',
+        '',
+        'Libraries: pose (1439 human poses, 4 body systems × 5 camera angles × 26 action types, each with a matching depth map), costume (1407 outfits, 8 season/occasion categories), portrait (1499 portrait and hair references, 2 sections × 4 hair lengths × 51 hairstyles). All keywords must match.',
+        '',
+        'Narrow by category with `kind` (KEY=VALUE, comma separated), for example "分类=蹲姿" or "体系=上半身单人,角度=侧面". Pass kind="list" to dump every category value with its count for a library.',
+        '',
+        'Pass the IDs you keep to optimize_image_prompt as `refs` (for example ["pose:full_sexy_P070_side"]) so the prompt reuses that exact wording.',
+      ].join('\n'),
+      parameters: {
+        query: {
+          type: 'string',
+          description: 'Chinese keywords, all of which must match, for example "蹲 侧面", "针织衫", "长发". Leave empty when filtering only by kind.',
+        },
+        lib: {
+          type: 'string',
+          enum: ['auto', 'pose', 'costume', 'portrait'],
+          description: 'Which library to search; auto (default) searches all three.',
+        },
+        kind: {
+          type: 'string',
+          description:
+            'Category filter, KEY=VALUE with multiple values comma separated, for example "分类=蹲姿" or "角度=侧面,体系=全身单人・性感系". Use "list" to list all categories of the chosen library.',
+        },
+        limit: {
+          type: 'integer',
+          description: 'How many hits to return, 1 to 40. Defaults to 6.',
+        },
+        offset: {
+          type: 'integer',
+          description: 'Skip this many hits before returning, for paging through a large category (0 to 5000). Defaults to 0.',
+        },
+      },
+      output: {
+        schema: { type: 'string' },
+        render: (_args, value) => [{ type: 'text', text: value }],
+      },
+      async execute(args) {
+        const lib = args.lib || 'auto';
+        if (String(args.kind ?? '').trim() === 'list') {
+          if (lib === 'auto') return '要列种类请指定 lib：pose / costume / portrait。';
+          const dims = await listKinds(lib);
+          const lines = dims.map((dim) => {
+            const items = dim.values.map((v) => `${v.value}(${v.count})`).join('、');
+            return `${dim.key}（${dim.values.length}）：${items}`;
+          });
+          return [`「${GALLERY_LIBS[lib].label}」的种类：`, '', ...lines, '', '筛选时用 kind="分类=蹲姿" 这种写法。'].join('\n');
+        }
+        const filters = parseKindFilters(args.kind);
+        const result = await searchGallery({
+          query: args.query ?? '',
+          lib,
+          limit: Math.max(1, Math.min(40, Number(args.limit) || 6)),
+          filters,
+          offset: args.offset ?? 0,
+        });
+        const works = result.works;
+        if (works.length === 0) {
+          const why = [args.query ? `「${args.query}」` : '', args.kind ? `kind=${args.kind}` : '']
+            .filter(Boolean)
+            .join(' + ');
+          return `没有命中 ${why}。把关键词拆短（只写「蹲」「夏」「长发」），去掉 kind 层层筛，或把 lib 换成 auto；不确定有哪些种类就先调 kind="list"。`;
+        }
+        const lines = works.map((work, index) => {
+          const bits = [
+            `${index + 1}. [${work.lib}] ${work.name}`,
+            `   分类：${work.tags.join('・') || '—'}`,
+            `   ID：${work.id}`,
+            `   图：${work.imageUrl}`,
+          ];
+          if (work.depthUrl) bits.push(`   深度图：${work.depthUrl}`);
+          return bits.join('\n');
+        });
+        return [
+          `命中 ${result.total} 条，本次返回第 ${result.offset + 1}-${result.offset + works.length} 条（${args.lib || 'auto'}）：`,
+          '',
+          ...lines,
+          '',
+          result.offset + works.length < result.total
+            ? `还有 ${result.total - result.offset - works.length} 条，用 offset=${result.offset + works.length} 继续取。`
+            : '已经是最后一批。',
+          '要把其中一条写进提示词，就把它的 ID 传给 optimize_image_prompt 的 refs，例如 ["pose:xxx"]。',
+        ].join('\n');
+      },
+    }),
+  );
   return () => {
+    disposeGallery();
     disposePatch();
     disposeOptimize();
   };
@@ -549,8 +689,46 @@ export function apply(ctx) {
         }),
       ),
       ctx.webServer.register(
+        route(`${API}/gallery`, async (req, res) => {
+          const body = await readJson(req);
+          const action = typeof body.action === 'string' ? body.action : 'search';
+          const lib = typeof body.lib === 'string' && body.lib ? body.lib : 'auto';
+          if (action === 'libraries') {
+            return writeJson(res, 200, { ok: true, libs: GALLERY_LIBS });
+          }
+          if (action === 'kinds') {
+            // 种类清单一次拉全，面板据此渲染筛选器；按库缓存，切库不重复读盘。
+            const targets = lib === 'auto' ? Object.keys(GALLERY_LIBS) : [lib];
+            const kinds = {};
+            for (const name of targets) kinds[name] = await listKinds(name);
+            return writeJson(res, 200, { ok: true, action, libs: GALLERY_LIBS, kinds });
+          }
+          const filters = parseKindFilters(body.filters);
+          if (action === 'random') {
+            const count = Math.max(1, Math.min(12, Number(body.count) || 3));
+            const works = await randomGallery({ lib, count, filters });
+            return writeJson(res, 200, { ok: true, action, libs: GALLERY_LIBS, works });
+          }
+          const limit = Math.max(1, Math.min(60, Number(body.limit) || 8));
+          const offset = Math.max(0, Math.min(5000, Number(body.offset) || 0));
+          const result = await searchGallery({ query: body.query ?? '', lib, limit, filters, offset });
+          writeJson(res, 200, {
+            ok: true,
+            action: 'search',
+            libs: GALLERY_LIBS,
+            works: result.works,
+            total: result.total,
+            offset: result.offset,
+            limit: result.limit,
+          });
+        }),
+      ),
+      ctx.webServer.register(
         route(`${API}/optimize`, async (req, res) => {
           const body = await readJson(req);
+          if (!body.referenceBlock && Array.isArray(body.refs) && body.refs.length > 0) {
+            body.referenceBlock = await resolveReferenceBlock(body.refs);
+          }
           const runId = typeof body.runId === 'string' ? body.runId.slice(0, 80) : '';
           const controller = runId ? beginRun(runId) : new AbortController();
           try {

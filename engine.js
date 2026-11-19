@@ -318,6 +318,11 @@ export function buildSystemPrompt(input = {}) {
     input.negative
       ? 'Return a real `negative` list even when the dialect ignores it: the host hides it for dialects that cannot use it.'
       : 'Set `negative` to an empty string unless the dialect rules require one.',
+    ...(input.referenceBlock
+      ? [
+          '8. A REFERENCE LIBRARY block may arrive in the user message. Its posture, garment and hair descriptions are binding facts: reuse the matching Chinese wording verbatim in the matching field, never contradict it, and never mention the library, its IDs, or that a reference set exists.',
+        ]
+      : []),
     '',
     'Before you answer, silently check: does every field add information? is there any banned filler word? does `prompt` obey the dialect rules exactly? is the JSON valid with double quotes?',
   ].join('\n');
@@ -349,6 +354,8 @@ export function buildUserPrompt(input = {}) {
   if (input.purpose) lines.push('', `INTENDED USE: ${oneLine(input.purpose, 200)}`);
   if (input.mustInclude) lines.push('', `MUST KEEP (verbatim elements): ${oneLine(input.mustInclude, 400)}`);
   if (input.mustAvoid) lines.push('', `MUST AVOID: ${oneLine(input.mustAvoid, 400)}`);
+  // 参考库块由 index.js 从 gallery.js 拼好传进来；engine 只当作普通文本，保持纯函数。
+  if (input.referenceBlock) lines.push('', String(input.referenceBlock).slice(0, 2000));
   if (input.aspect && input.aspect !== 'auto') lines.push('', `ASPECT RATIO: ${input.aspect}`);
   if (input.styleHint && findStyle(input.style).key === 'custom') lines.push('', `CUSTOM STYLE: ${oneLine(input.styleHint, 600)}`);
   lines.push('', 'Return the JSON object now.');

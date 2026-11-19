@@ -23,6 +23,11 @@ window.__ModuleLoader__.load({
     const IMAGE_MODELS_API = '/api/dsh-imagegen/image-models';
     const GENERATE_API = '/api/dsh-imagegen/generate';
     const IMAGE_MAX_EDGE = 1280;
+    // 图生图的前置指令：不加这句，模型会照着提示词重画一个人，导入的图等于白给。
+    const EDIT_PREFIX = {
+      en: 'Use the first reference image as the only subject: keep the same person — face, hair, body type and skin tone unchanged — and change only the pose, outfit and scene described below.\n\n',
+      zh: '以第一张参考图为唯一主体：保持人物身份不变（脸、发型、体型、肤色都不改），只按下面这段描述调整姿态、服装与场景。\n\n',
+    };
     // 出图尺寸用比例字符串（dsh-imagegen 会按协议换算成像素），清晰度用 1k/2k/4k。
     const IMAGE_SIZES = ['auto', '1:1', '3:4', '4:3', '9:16', '2:3', '3:2', '16:9', '21:9'];
     const IMAGE_QUALITIES = ['auto', '1k', '2k', '4k'];
@@ -32,7 +37,7 @@ window.__ModuleLoader__.load({
     const STORE_KEY = 'dsh-image-prompt-forge:v1';
     const HISTORY_LIMIT = 24;
     // 页脚显示，用来一眼判断浏览器加载的是哪一版 bundle（缓存排查用）。
-    const BUILD = '1.1.4';
+    const BUILD = '1.3.0';
 
     // Labels are duplicated from engine.js on purpose: client.js is loaded as a
     // separate bundle and cannot import ESM. The host catalog (fetched on open)
@@ -138,6 +143,24 @@ window.__ModuleLoader__.load({
       clearIdeaHint: '清空上面这段描述',
       removeHistory: '删除这条',
       clearHistory: '清空历史',
+      gallery: '参考库（可选）',
+      galleryHint: '4,345 条中文参考：姿势库带深度图，挑中什么模型就照什么写，不用自己描述',
+      galleryAll: '全部',
+      gallerySearch: '搜索，例如「蹲 侧面」「针织衫」「长发」',
+      galleryLoading: '检索中…首次要下 2 MB 索引，之后离线可用',
+      galleryEmpty: '没有命中，换成更短的关键词试试',
+      galleryPick: '点一下加入参考',
+      gallerySelected: '已选参考',
+      galleryAny: '不限',
+      galleryKinds: '种类',
+      kindsMore: '更多',
+      kindsLess: '收起',
+      galleryMore: '加载更多',
+      shotAdd: '加一张参考图',
+      shotHint: 'Ctrl+V 直接粘贴剪贴板里的图；第一张当主体，其余当参考，最多四张。',
+      usePoseRefs: '把手上的姿势图也发过去',
+      shotLoadedNoModel: '图已载入，可以直接拿去图生图。',
+      renderEdit: '图生图',
       model: '优化模型',
       provider: '渠道',
       noModel: '未选择模型',
@@ -239,6 +262,24 @@ window.__ModuleLoader__.load({
       clearIdeaHint: 'Clear the brief',
       removeHistory: 'Delete this entry',
       clearHistory: 'Clear history',
+      gallery: 'Reference library',
+      galleryHint: '4,345 curated Chinese references: the pose library carries depth maps, so whatever you pick is exactly what the model writes',
+      galleryAll: 'All',
+      gallerySearch: 'Search, e.g. "squat side", "knit sweater", "long hair"',
+      galleryLoading: 'Searching… the first run downloads a 2 MB index, then it is offline',
+      galleryEmpty: 'No hit — try a shorter keyword',
+      galleryPick: 'Click to add as reference',
+      gallerySelected: 'Selected references',
+      galleryAny: 'Any',
+      galleryKinds: 'Categories',
+      kindsMore: 'more',
+      kindsLess: 'less',
+      galleryMore: 'load more',
+      shotAdd: 'add a reference image',
+      shotHint: 'Paste with Ctrl+V. The first image is the subject, the rest are references (max 4).',
+      usePoseRefs: 'also send the pose references',
+      shotLoadedNoModel: 'Image loaded — ready for image-to-image.',
+      renderEdit: 'image-to-image',
       model: 'Optimizer model',
       provider: 'Provider',
       noModel: 'No model selected',
@@ -298,7 +339,7 @@ window.__ModuleLoader__.load({
 .dpf-embed{position:relative;display:flex;flex:1 1 auto;width:100%;height:100%;min-height:520px;overflow:hidden}
 .dpf-embed .dpf-panel{width:100%;height:100%;border:0;border-radius:0;box-shadow:none;background:var(--dsw-alias-bg-primary,#141416)}
 
-.dpf-panel{width:min(1180px,100%);height:min(860px,100%);display:flex;flex-direction:column;background:var(--dsw-alias-bg-elevated,#1c1c1e);color:var(--dsw-alias-text-primary,#eee);border:1px solid var(--dsw-alias-border-default,#ffffff18);border-radius:16px;box-shadow:0 26px 96px #000a;overflow:hidden;font-size:13px;line-height:1.55}
+.dpf-panel{width:min(1180px,100%);height:min(860px,100%);display:flex;flex-direction:column;background:var(--dsw-alias-bg-elevated,#1c1c1e);color:var(--dsw-alias-text-primary,#eee);border:1px solid var(--dsw-alias-border-default,#ffffff18);border-radius:16px;box-shadow:0 26px 96px #000a;overflow:hidden;font-size:13px;line-height:1.55;color-scheme:dark}
 .dpf-panel *{box-sizing:border-box}
 .dpf-head{display:flex;align-items:center;gap:12px;padding:18px 20px 15px;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff12);flex-wrap:wrap}
 .dpf-head>svg{width:24px;height:24px;flex:none;color:var(--dsw-alias-interactive-primary,#c9b6ff)}
@@ -326,6 +367,46 @@ window.__ModuleLoader__.load({
 .dpf-select option{background:#222;color:#eee}
 .dpf-grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .dpf-grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.dpf-gallery{margin-top:12px;padding:10px;border:1px dashed var(--dsw-alias-border-default,#ffffff1c);border-radius:10px;background:var(--dsw-alias-bg-secondary,#ffffff05)}
+.dpf-gallery-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.dpf-gallery-count{font-size:11px;color:var(--dsw-alias-text-secondary,#8b8b90);font-variant-numeric:tabular-nums}
+.dpf-gallery-hint{font-size:11px;color:var(--dsw-alias-text-secondary,#8b8b90);margin-bottom:8px;line-height:1.5}
+.dpf-gallery-search{display:flex;gap:6px;margin-bottom:8px}
+.dpf-gallery-search .dpf-input{flex:1;min-width:0}
+.dpf-gallery-libs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.dpf-chip{border:1px solid var(--dsw-alias-border-default,#ffffff1c);background:transparent;color:var(--dsw-alias-text-secondary,#9a9aa0);border-radius:999px;padding:4px 11px;font:inherit;font-size:11.5px;cursor:pointer}
+.dpf-chip:hover{color:var(--dsw-alias-text-primary,#ddd);background:var(--dsw-alias-bg-hover,#ffffff10)}
+.dpf-chip[data-on]{background:var(--dsw-alias-interactive-primary,#ededf0);color:var(--dsw-alias-text-on-primary,#141416);border-color:transparent;font-weight:600}
+.dpf-gallery-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px;max-height:min(46vh,420px);overflow:auto;padding:2px}
+.dpf-gallery-more{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px}
+.dpf-refshots{display:flex;flex-direction:column;gap:5px;margin-top:7px}
+.dpf-refshots-row{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.dpf-refshot{position:relative;width:44px;height:44px;border-radius:8px;overflow:hidden;border:1px solid var(--dsw-alias-border-default,#ffffff1c);background:#00000040}
+.dpf-refshot img{width:100%;height:100%;object-fit:cover;display:block}
+.dpf-refshot-x{position:absolute;top:1px;right:1px;width:15px;height:15px;padding:0;border:0;border-radius:50%;background:#000000b0;color:#fff;font-size:11px;line-height:15px;cursor:pointer}
+.dpf-refshot-add{width:44px;height:44px;border:1px dashed var(--dsw-alias-border-default,#ffffff2a);border-radius:8px;background:transparent;color:var(--dsw-alias-text-secondary,#8e8e94);font-size:17px;line-height:1;cursor:pointer}
+.dpf-refshot-add:hover{color:var(--dsw-alias-text-primary,#eee);border-color:var(--dsw-alias-text-secondary,#8e8e94)}
+.dpf-refshots-hint{font-size:10.5px;line-height:1.5;color:var(--dsw-alias-text-secondary,#8b8b90)}
+.dpf-check{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--dsw-alias-text-secondary,#a0a0a6);cursor:pointer}
+.dpf-check input{accent-color:#6b8afd}
+.dpf-gallery-card{position:relative;padding:0;border:1px solid var(--dsw-alias-border-default,#ffffff18);border-radius:8px;background:#00000030;overflow:hidden;cursor:pointer;display:flex;flex-direction:column}
+.dpf-gallery-card img{width:100%;height:96px;object-fit:contain;display:block;background:radial-gradient(circle at 50% 42%,#ffffff12,#00000000 72%)}
+.dpf-gallery-card[data-on]{border-color:var(--dsw-alias-interactive-primary,#c9b6ff);box-shadow:0 0 0 1px var(--dsw-alias-interactive-primary,#c9b6ff) inset}
+.dpf-gallery-name{display:block;font-size:10px;line-height:1.3;padding:3px 4px;color:var(--dsw-alias-text-secondary,#9a9aa0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+.dpf-gallery-card[data-on] .dpf-gallery-name{color:var(--dsw-alias-text-primary,#ddd)}
+.dpf-gallery-note{font-size:11px;color:var(--dsw-alias-text-secondary,#8b8b90);margin:4px 0 0}
+.dpf-selected{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
+.dpf-selected-item{display:inline-flex;align-items:center;gap:5px;max-width:100%;border:1px solid var(--dsw-alias-border-default,#ffffff1c);border-radius:999px;padding:3px 6px 3px 3px;font-size:11px;background:#00000030}
+.dpf-selected-item img{width:20px;height:20px;border-radius:50%;object-fit:cover;flex:none}
+.dpf-selected-item span{max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dpf-selected-x{border:0;background:transparent;color:var(--dsw-alias-text-secondary,#9a9aa0);cursor:pointer;font-size:13px;line-height:1;padding:0 2px}
+.dpf-selected-x:hover{color:var(--dsw-alias-text-danger,#ef767a)}
+.dpf-gallery-kinds{display:flex;flex-direction:column;gap:7px;margin-bottom:8px;padding-top:8px;border-top:1px dashed var(--dsw-alias-border-default,#ffffff14)}
+.dpf-kinds-row{display:flex;align-items:flex-start;gap:8px}
+.dpf-kinds-label{flex:none;min-width:40px;padding-top:4px;font-size:11px;color:var(--dsw-alias-text-secondary,#8b8b90)}
+.dpf-kinds-values{display:flex;flex-wrap:wrap;gap:5px;flex:1;min-width:0;max-height:104px;overflow-y:auto;padding-right:2px}
+.dpf-chip-more{border-style:dashed;opacity:.75}
+.dpf-chip-more:hover{opacity:1}
 .dpf-label{display:block;font-size:11px;color:var(--dsw-alias-text-secondary,#86868c);margin-bottom:5px;letter-spacing:.02em}
 .dpf-actions{display:flex;gap:8px;position:sticky;bottom:0;padding:10px 0 4px;background:linear-gradient(to top,var(--dsw-alias-bg-elevated,#1c1c1e) 62%,transparent)}
 .dpf-btn{border:1px solid var(--dsw-alias-border-default,#ffffff20);border-radius:8px;background:var(--dsw-alias-bg-secondary,#ffffff08);color:inherit;padding:8px 14px;cursor:pointer;font:inherit;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
@@ -465,7 +546,7 @@ window.__ModuleLoader__.load({
          * 原图往往几 MB，直接上传既慢又容易顶到宿主上限；这里先在 canvas 里缩一次，
          * 缩不动（解码失败）就退回原始 data URL，让宿主去判断。
          */
-        async function readImageFile(file) {
+        async function readImageFile(file, maxEdge = IMAGE_MAX_EDGE) {
           const raw = await new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = () => resolve(String(reader.result || ''));
@@ -475,7 +556,7 @@ window.__ModuleLoader__.load({
           if (raw.length < 900000) return raw;
           try {
             const bitmap = await createImageBitmap(file);
-            const scale = Math.min(1, IMAGE_MAX_EDGE / Math.max(bitmap.width || 1, bitmap.height || 1));
+            const scale = Math.min(1, maxEdge / Math.max(bitmap.width || 1, bitmap.height || 1));
             const canvas = document.createElement('canvas');
             canvas.width = Math.max(1, Math.round((bitmap.width || 1) * scale));
             canvas.height = Math.max(1, Math.round((bitmap.height || 1) * scale));
@@ -486,6 +567,24 @@ window.__ModuleLoader__.load({
             return canvas.toDataURL('image/jpeg', 0.86);
           } catch {
             return raw;
+          }
+        }
+
+        /**
+         * 把远程图链（参考库的深度图/白模）抓成 data URL。
+         * 生图后端要的是内联 base64，不能让它自己回源——那既慢又容易被上游网关拦。
+         * 跨域失败就返回空串，调用方跳过这张，不阻断整次生成。
+         */
+        async function remoteImageToDataUrl(url, maxEdge) {
+          try {
+            const response = await fetch(url, { mode: 'cors' });
+            if (!response.ok) return '';
+            const blob = await response.blob();
+            if (!blob.type.startsWith('image/')) return '';
+            const file = new File([blob], 'ref.webp', { type: blob.type });
+            return await readImageFile(file, maxEdge);
+          } catch {
+            return '';
           }
         }
 
@@ -588,6 +687,20 @@ window.__ModuleLoader__.load({
           const [mustAvoid, setMustAvoid] = useState(typeof stored.mustAvoid === 'string' ? stored.mustAvoid : '');
           const [styleHint, setStyleHint] = useState(typeof stored.styleHint === 'string' ? stored.styleHint : '');
           const [advanced, setAdvanced] = useState(false);
+          // 参考库：选中项只保留展示用的轻量字段，提交时只发 {lib, id}。
+          const [refs, setRefs] = useState(Array.isArray(stored.refs) ? stored.refs : []);
+          const [refLib, setRefLib] = useState('auto');
+          const [refQuery, setRefQuery] = useState('');
+          const [refWorks, setRefWorks] = useState([]);
+          // 服务端报的命中总数，用来显示「24 / 1439」并决定还要不要给「加载更多」。
+          const [refTotal, setRefTotal] = useState(0);
+          const [refLoading, setRefLoading] = useState(false);
+          const [refError, setRefError] = useState('');
+          // 种类维度：{pose:[{key,values}], costume:[...], portrait:[...]}，切库时按需拉取。
+          const [refKinds, setRefKinds] = useState({});
+          const [refFilters, setRefFilters] = useState({});
+          // 哪个维度展开了全部取值（26 类动作、51 种发型默认折叠）。
+          const [refKindsOpen, setRefKindsOpen] = useState({});
 
           const [result, setResult] = useState(null);
           const [editedPrompt, setEditedPrompt] = useState('');
@@ -599,6 +712,10 @@ window.__ModuleLoader__.load({
 
           // 反推图片 / 差量修改 / 直接出图 三块的局部状态
           const [image, setImage] = useState(null);
+          // 图生图的附加参考（最多 4 张）：主图放在 image 里，其余进这里。
+          const [refShots, setRefShots] = useState([]);
+          // 是否把参考库里勾选的姿势/服装图一起当作图像条件发过去。
+          const [usePoseRefs, setUsePoseRefs] = useState(false);
           const [describing, setDescribing] = useState(false);
           const [dragOver, setDragOver] = useState(false);
           const [patchText, setPatchText] = useState('');
@@ -619,6 +736,7 @@ window.__ModuleLoader__.load({
           const [imageChannelId, setImageChannelId] = useState(typeof stored.imageChannelId === 'string' ? stored.imageChannelId : '');
           const [imageModel, setImageModel] = useState(typeof stored.imageModel === 'string' ? stored.imageModel : '');
           const fileRef = useRef(null);
+          const extraRef = useRef(null);
           const probeModelsRef = useRef(null);
           const [copied, copy] = useCopy();
 
@@ -752,8 +870,8 @@ window.__ModuleLoader__.load({
           }, []);
 
           useEffect(() => {
-            writeStore({ provider, model, dialect, style, aspect, language, mode, candidates, idea, purpose, mustInclude, mustAvoid, styleHint });
-          }, [provider, model, dialect, style, aspect, language, mode, candidates, idea, purpose, mustInclude, mustAvoid, styleHint]);
+            writeStore({ provider, model, dialect, style, aspect, language, mode, candidates, idea, purpose, mustInclude, mustAvoid, styleHint, refs });
+          }, [provider, model, dialect, style, aspect, language, mode, candidates, idea, purpose, mustInclude, mustAvoid, styleHint, refs]);
 
           const modelOptions = useMemo(() => {
             const flat = [];
@@ -762,6 +880,265 @@ window.__ModuleLoader__.load({
           }, [groups]);
 
           const modelReady = Boolean(provider && model);
+
+          // 参考库检索：命中的条目带 CDN 图（姿势库是深度图），点一下进 selected，提交时只发 lib+id。
+          // 一页 24 张，底部「加载更多」按 offset 续，总共能翻到多少由服务端的 total 决定。
+          const REF_PAGE = 24;
+          const searchRefs = useCallback(async (query, lib, filters, append) => {
+            const at = append ? (Array.isArray(append) ? append.length : 0) : 0;
+            if (!append) setRefWorks([]);
+            setRefLoading(true);
+            setRefError('');
+            try {
+              const payload = await post('gallery', {
+                action: 'search',
+                query: query || '',
+                lib,
+                limit: REF_PAGE,
+                offset: at,
+                filters: filters && Object.keys(filters).length > 0 ? filters : undefined,
+              });
+              if (payload && payload.ok === false) {
+                setRefError(payload.message || t('galleryEmpty'));
+                if (!append) setRefWorks([]);
+                setRefTotal(0);
+              } else {
+                const batch = Array.isArray(payload?.works) ? payload.works : [];
+                setRefWorks((previous) => {
+                  if (!append) return batch;
+                  const seen = new Set(previous.map((item) => `${item.lib}:${item.id}`));
+                  return [...previous, ...batch.filter((item) => !seen.has(`${item.lib}:${item.id}`))];
+                });
+                setRefTotal(Number(payload?.total) || batch.length);
+              }
+            } catch (failure) {
+              setRefError(explain(failure));
+            } finally {
+              setRefLoading(false);
+            }
+          }, [t]);
+
+          // 拉某个库的种类清单（体系/角度/分类 之类）。服务端有内存缓存，切回来也不重复读盘。
+          const loadKinds = useCallback(async (lib) => {
+            if (!lib || lib === 'auto') return;
+            try {
+              const payload = await post('gallery', { action: 'kinds', lib });
+              if (payload?.kinds?.[lib]) {
+                const dims = payload.kinds[lib];
+                setRefKinds((previous) => ({ ...previous, [lib]: dims }));
+              }
+            } catch {
+              // 种类拉不到不影响搜索，静默降级
+            }
+          }, []);
+
+          // 点种类：带上新筛选立刻重查。state 是异步的，所以本地先算好 next 再发请求。
+          const applyFilter = useCallback((key, value) => {
+            const next = { ...refFilters, [key]: value };
+            setRefFilters(next);
+            if (refLib !== 'auto') void searchRefs(refQuery, refLib, next);
+          }, [refFilters, refLib, refQuery, searchRefs]);
+
+          const switchLib = useCallback((key) => {
+            setRefLib(key);
+            setRefFilters({});
+            setRefKindsOpen({});
+            if (key !== 'auto') void loadKinds(key);
+            void searchRefs(refQuery, key, {});
+          }, [loadKinds, refQuery, searchRefs]);
+
+          const toggleRef = useCallback((work) => {
+            setRefs((previous) => {
+              const exists = previous.some((item) => item.lib === work.lib && item.id === work.id);
+              if (exists) return previous.filter((item) => !(item.lib === work.lib && item.id === work.id));
+              return [
+                ...previous,
+                { lib: work.lib, id: work.id, name: work.name, tags: work.tags || [], thumbUrl: work.thumbUrl, imageUrl: work.imageUrl },
+              ].slice(0, 6);
+            });
+          }, []);
+
+          // 参考库面板：搜索 → 缩略图网格 → 选中的条目挂在输入框下面。
+          // 种类维度只在选定单个库时出现（auto 混三库没有统一维度）。
+          // 全部用胶囊按钮而不是原生 select：原生下拉的选项列表由系统绘制，
+          // 深色主题下会变成白底浅字，改 CSS 也压不住。
+          const kindDims = refLib === 'auto' ? [] : refKinds[refLib] || [];
+          const kindsPending = refLib !== 'auto' && !refKinds[refLib];
+          const kindsBox = kindDims.length > 0
+            ? h(
+                'div',
+                { className: 'dpf-gallery-kinds' },
+                kindDims.map((dim) => {
+                  const active = refFilters[dim.key] || '';
+                  const open = refKindsOpen[dim.key] === true;
+                  const CHIP_LIMIT = 8;
+                  // 选中的那个永远排在最前，折叠时也不会被藏起来。
+                  const ordered = active
+                    ? [...dim.values.filter((item) => item.value === active), ...dim.values.filter((item) => item.value !== active)]
+                    : dim.values;
+                  const shown = open ? ordered : ordered.slice(0, CHIP_LIMIT);
+                  const rest = ordered.length - shown.length;
+                  return h(
+                    'div',
+                    { className: 'dpf-kinds-row', key: dim.key },
+                    h('span', { className: 'dpf-kinds-label' }, dim.key),
+                    h(
+                      'div',
+                      { className: 'dpf-kinds-values' },
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'dpf-chip',
+                          'data-on': active ? undefined : '1',
+                          onClick: () => applyFilter(dim.key, ''),
+                        },
+                        `${t('galleryAny')} ${dim.values.reduce((sum, item) => sum + item.count, 0)}`,
+                      ),
+                      shown.map((item) =>
+                        h(
+                          'button',
+                          {
+                            key: item.value,
+                            type: 'button',
+                            className: 'dpf-chip',
+                            'data-on': active === item.value ? '1' : undefined,
+                            onClick: () => applyFilter(dim.key, item.value),
+                          },
+                          `${item.value} ${item.count}`,
+                        ),
+                      ),
+                      (rest > 0 || open) &&
+                        h(
+                          'button',
+                          {
+                            type: 'button',
+                            className: 'dpf-chip dpf-chip-more',
+                            onClick: () =>
+                              setRefKindsOpen((previous) => ({ ...previous, [dim.key]: !open })),
+                          },
+                          open ? t('kindsLess') : `+${rest} ${t('kindsMore')}`,
+                        ),
+                    ),
+                  );
+                }),
+              )
+            : null;
+          const galleryBox = h(
+            'div',
+            { className: 'dpf-gallery' },
+            h(
+              'div',
+              { className: 'dpf-gallery-head' },
+              h('span', { className: 'dpf-label', style: { margin: 0, flex: 1 } }, t('gallery')),
+              refs.length > 0 && h('span', { className: 'dpf-gallery-count' }, `${refs.length}/6`),
+            ),
+            h('div', { className: 'dpf-gallery-hint' }, t('galleryHint')),
+            h(
+              'div',
+              { className: 'dpf-gallery-search' },
+              h('input', {
+                className: 'dpf-input',
+                value: refQuery,
+                maxLength: 40,
+                placeholder: t('gallerySearch'),
+                onChange: (event) => setRefQuery(event.target.value),
+                onKeyDown: (event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void searchRefs(refQuery, refLib, refFilters);
+                  }
+                },
+              }),
+              h(
+                'button',
+                { className: 'dpf-btn dpf-btn-small', type: 'button', disabled: refLoading, onClick: () => void searchRefs(refQuery, refLib, refFilters) },
+                refLoading ? t('galleryLoading') : '搜索',
+              ),
+            ),
+            h(
+              'div',
+              { className: 'dpf-gallery-libs' },
+              [
+                ['auto', t('galleryAll')],
+                ['pose', '姿势'],
+                ['costume', '服装'],
+                ['portrait', '人像'],
+              ].map(([key, label]) =>
+                h(
+                  'button',
+                  {
+                    key,
+                    type: 'button',
+                    className: 'dpf-chip',
+                    'data-on': refLib === key ? '1' : undefined,
+                    onClick: () => switchLib(key),
+                  },
+                  label,
+                ),
+              ),
+            ),
+            kindsPending && h('div', { className: 'dpf-gallery-note' }, `${t('galleryKinds')}…`),
+            kindsBox,
+            refError && h('div', { className: 'dpf-gallery-note dpf-warn' }, refError),
+            refWorks.length > 0 &&
+              h(
+                'div',
+                { className: 'dpf-gallery-grid' },
+                refWorks.map((work) =>
+                  h(
+                    'button',
+                    {
+                      key: `${work.lib}:${work.id}`,
+                      type: 'button',
+                      className: 'dpf-gallery-card',
+                      'data-on': refs.some((item) => item.lib === work.lib && item.id === work.id) ? '1' : undefined,
+                      title: `${work.name}\n${(work.tags || []).join('・')}`,
+                      onClick: () => toggleRef(work),
+                    },
+                    h('img', { src: work.thumbUrl, alt: '', loading: 'lazy' }),
+                    h('span', { className: 'dpf-gallery-name' }, work.name),
+                  ),
+                ),
+              ),
+            // 一页只来 24 张，超过这个数的类别不会凭空补齐：明示总数，再给一个续页按钮。
+            refTotal > 0 &&
+              h(
+                'div',
+                { className: 'dpf-gallery-more' },
+                h(
+                  'span',
+                  { className: 'dpf-gallery-note', style: { margin: 0 } },
+                  `${refWorks.length} / ${refTotal}`,
+                ),
+                refWorks.length < refTotal &&
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dpf-chip',
+                      disabled: refLoading,
+                      onClick: () => searchRefs(refQuery, refLib, refFilters, refWorks),
+                    },
+                    refLoading ? `${t('galleryLoading')}` : `${t('galleryMore')} ${Math.min(24, refTotal - refWorks.length)}`,
+                  ),
+              ),
+            refs.length > 0 &&
+              h(
+                'div',
+                { className: 'dpf-selected' },
+                h('span', { className: 'dpf-label', style: { margin: 0 } }, t('gallerySelected')),
+                refs.map((item) =>
+                  h(
+                    'span',
+                    { key: `${item.lib}:${item.id}`, className: 'dpf-selected-item' },
+                    h('img', { src: item.thumbUrl, alt: '' }),
+                    h('span', null, item.name),
+                    h('button', { type: 'button', className: 'dpf-selected-x', onClick: () => toggleRef(item) }, '×'),
+                  ),
+                ),
+              ),
+          );
 
           const run = useCallback(async () => {
             if (running) return;
@@ -794,6 +1171,7 @@ window.__ModuleLoader__.load({
                 mustInclude,
                 mustAvoid,
                 styleHint,
+                refs: refs.map((item) => ({ lib: item.lib, id: item.id })),
                 remember: true,
               });
               if (!mounted.current || runIdRef.current !== runId) return;
@@ -832,7 +1210,7 @@ window.__ModuleLoader__.load({
                 runIdRef.current = '';
               }
             }
-          }, [running, idea, modelReady, provider, model, dialect, style, aspect, language, mode, candidates, purpose, mustInclude, mustAvoid, styleHint, t]);
+          }, [running, idea, modelReady, provider, model, dialect, style, aspect, language, mode, candidates, purpose, mustInclude, mustAvoid, styleHint, refs, t]);
 
           const stop = useCallback(() => {
             const runId = runIdRef.current;
@@ -888,8 +1266,18 @@ window.__ModuleLoader__.load({
                 setError(t('previewFailed'));
                 return;
               }
+              // 图先落地：即便没配对话模型，这张图也能直接拿来图生图，
+              // 所以「没选模型」只是跳过读图，不该把导入也一起拦掉。
               if (!modelReady) {
-                setError(t('needModel'));
+                try {
+                  const data = await readImageFile(file);
+                  const shot = { data, name: file.name || 'reference.png' };
+                  imageRef.current = shot;
+                  setImage(shot);
+                  setNotice(t('shotLoadedNoModel'));
+                } catch {
+                  setError(t('previewFailed'));
+                }
                 return;
               }
               setError('');
@@ -899,7 +1287,9 @@ window.__ModuleLoader__.load({
               runIdRef.current = runId;
               try {
                 const data = await readImageFile(file);
-                setImage({ data, name: file.name || 'reference.png' });
+                const shot = { data, name: file.name || 'reference.png' };
+                imageRef.current = shot;
+                setImage(shot);
                 const mediaType = (/^data:([^;]+);/.exec(data) || [])[1] || file.type || 'image/png';
                 const payload = await post('describe', {
                   runId,
@@ -935,6 +1325,57 @@ window.__ModuleLoader__.load({
 
           const pickImage = useCallback(() => {
             fileRef.current?.click?.();
+          }, []);
+
+          /**
+           * 统一的图片入口：主图槽空着就填主图，已经有主图就进附加参考（最多 4 张）。
+           * 生图后端只接受一张 image + 最多四张 images，所以这里先按这个上限收。
+           */
+          const imageRef = useRef(null);
+          const loadShot = useCallback(async (file, forceExtra) => {
+            if (!file || !String(file.type || '').startsWith('image/')) return;
+            let data = '';
+            try {
+              data = await readImageFile(file);
+            } catch {
+              setError(t('previewFailed'));
+              return;
+            }
+            if (!data) return;
+            const shot = { data, name: file.name || 'reference.png' };
+            if (!forceExtra && !imageRef.current) {
+              imageRef.current = shot;
+              setImage(shot);
+              return;
+            }
+            setRefShots((previous) => (previous.length >= 4 ? previous : [...previous, shot]));
+          }, [t]);
+
+          // 记一份 image 的实时值，避免粘贴回调拿到上一帧的闭包。
+          useEffect(() => {
+            imageRef.current = image;
+          }, [image]);
+
+          // 面板打开时，直接 Ctrl+V 就能把剪贴板里的图塞进来——这是最顺手的一条路。
+          useEffect(() => {
+            const onPaste = (event) => {
+              const items = event.clipboardData?.items;
+              if (!items) return;
+              for (const item of items) {
+                if (item.kind !== 'file' || !String(item.type || '').startsWith('image/')) continue;
+                const file = item.getAsFile();
+                if (!file) continue;
+                event.preventDefault();
+                void loadShot(file);
+                return;
+              }
+            };
+            window.addEventListener('paste', onPaste);
+            return () => window.removeEventListener('paste', onPaste);
+          }, [loadShot]);
+
+          const removeRefShot = useCallback((index) => {
+            setRefShots((previous) => previous.filter((_, at) => at !== index));
           }, []);
 
           // ── 词 → 改词 ───────────────────────────────────────────────
@@ -1101,11 +1542,23 @@ window.__ModuleLoader__.load({
             setGenerating(true);
             setPreviewError('');
             try {
+              // 图生图：导入的主图作为 image，附加参考与姿势图作为 images（上限四张）。
+              const primary = imageRef.current?.data || '';
+              const gallery = refShots.map((shot) => shot?.data).filter(Boolean).slice(0, 4);
+              if (usePoseRefs && refs.length > 0 && gallery.length < 4) {
+                for (const item of refs) {
+                  if (gallery.length >= 4) break;
+                  if (!item?.imageUrl) continue;
+                  const data = await remoteImageToDataUrl(item.imageUrl, 768);
+                  if (data) gallery.push(data);
+                }
+              }
               const response = await fetch(GENERATE_API, {
                 method: 'POST',
                 headers: { 'content-type': 'application/json' },
                 body: JSON.stringify({
-                  prompt,
+                  mode: primary ? 'edit' : 'text',
+                  prompt: primary ? `${EDIT_PREFIX[language] || EDIT_PREFIX.en}${prompt}` : prompt,
                   size:
                     imageSize !== 'auto'
                       ? imageSize
@@ -1114,6 +1567,8 @@ window.__ModuleLoader__.load({
                         : 'auto',
                   quality: imageQuality,
                   n: 1,
+                  ...(primary ? { image: primary } : {}),
+                  ...(gallery.length > 0 ? { images: gallery } : {}),
                   ...(activeChannel ? { channelId: activeChannel.id } : {}),
                   ...(effectiveImageModel ? { model: effectiveImageModel } : {}),
                 }),
@@ -1135,7 +1590,7 @@ window.__ModuleLoader__.load({
             } finally {
               setGenerating(false);
             }
-          }, [editedPrompt, result, generating, t, activeChannel, effectiveImageModel, imageSize, imageQuality]);
+          }, [editedPrompt, result, generating, t, activeChannel, effectiveImageModel, imageSize, imageQuality, refShots, usePoseRefs, refs, language]);
 
           const onDropImage = useCallback(
             (event) => {
@@ -1313,6 +1768,18 @@ window.__ModuleLoader__.load({
                         if (file) void describeFile(file);
                       },
                     }),
+                    h('input', {
+                      type: 'file',
+                      accept: 'image/*',
+                      multiple: true,
+                      ref: extraRef,
+                      style: { display: 'none' },
+                      onChange: (event) => {
+                        const files = Array.from(event.target.files || []);
+                        event.target.value = '';
+                        for (const file of files.slice(0, 4)) void loadShot(file, true);
+                      },
+                    }),
                     image
                       ? h(
                           'div',
@@ -1350,6 +1817,62 @@ window.__ModuleLoader__.load({
                           },
                           describing ? t('describing') : dragOver ? t('imageListening') : t('dropImage'),
                         ),
+                    // 附加参考槽：主图之外最多再塞四张，生成时一起作为图像条件。
+                    h(
+                      'div',
+                      { className: 'dpf-refshots' },
+                      h(
+                        'div',
+                        { className: 'dpf-refshots-row' },
+                        refShots.map((shot, index) =>
+                          h(
+                            'div',
+                            { className: 'dpf-refshot', key: `${index}-${shot.name || ''}` },
+                            h('img', { src: shot.data, alt: '' }),
+                            h(
+                              'button',
+                              { type: 'button', className: 'dpf-refshot-x', onClick: () => removeRefShot(index), title: t('clear') },
+                              '×',
+                            ),
+                          ),
+                        ),
+                        refShots.length < 4 &&
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              className: 'dpf-refshot-add',
+                              title: t('shotAdd'),
+                              onClick: () => extraRef.current?.click?.(),
+                              onDragOver: (event) => {
+                                event.preventDefault();
+                                setDragOver(true);
+                              },
+                              onDragLeave: () => setDragOver(false),
+                              onDrop: (event) => {
+                                event.preventDefault();
+                                setDragOver(false);
+                                const file = event.dataTransfer?.files?.[0];
+                                if (file) void loadShot(file, true);
+                              },
+                            },
+                            '+',
+                          ),
+                      ),
+                      h('div', { className: 'dpf-refshots-hint' }, t('shotHint')),
+                      refs.length > 0 &&
+                        h(
+                          'label',
+                          { className: 'dpf-check' },
+                          h('input', {
+                            type: 'checkbox',
+                            checked: usePoseRefs,
+                            onChange: (event) => setUsePoseRefs(event.target.checked),
+                          }),
+                          h('span', null, `${t('usePoseRefs')}（${refs.length}）`),
+                        ),
+                    ),
+                    galleryBox,
                   ),
                   h(
                     'div',
@@ -1586,7 +2109,7 @@ window.__ModuleLoader__.load({
                             title: t('previewHint'),
                             onClick: () => void renderOne(),
                           },
-                          generating ? t('generating') : t('preview'),
+                          generating ? t('generating') : image ? t('renderEdit') : t('preview'),
                         ),
                         h('button', { className: 'dpf-btn dpf-btn-small', type: 'button', onClick: () => copy(editedPrompt || result.prompt, 'main') }, copied === 'main' ? t('copied') : t('copy')),
                       ),

@@ -157,6 +157,31 @@ check('双击复位', clientSource.includes('onDoubleClick') && clientSource.inc
 check('倍率条与缩放按钮', clientSource.includes('dpf-zoom-level') && clientSource.includes("Math.round(zoom.scale * 100)") && clientSource.includes('zoomBy(1.25)'), 'zoom-level');
 check('大图提示文案', clientSource.includes("className: 'dpf-lightbox-hint'"), 'hint');
 
+// 参考库：姿势库缩略图走深度图、种类维度可点选筛选
+for (const key of ['galleryAny', 'galleryKinds']) {
+  check(`新文案 ${key}`, typeof zhFlat[key] === 'string' && zhFlat[key].length > 0, String(zhFlat[key]));
+}
+check('种类筛选已渲染', clientSource.includes('dpf-gallery-kinds') && clientSource.includes('dpf-kinds-values'), 'dpf-kinds');
+// 原生 select 的选项由系统绘制，深色主题下会是白底浅字：种类一律用胶囊按钮。
+check('种类不用原生 select', !clientSource.includes('dpf-kinds-select'), 'no-select');
+check('面板声明深色优先', clientSource.includes('color-scheme:dark'), 'color-scheme');
+check('种类可展开收起', clientSource.includes('dpf-chip-more') && clientSource.includes('setRefKindsOpen'), 'chip-more');
+check('种类走 kinds 动作', clientSource.includes("action: 'kinds'"), 'kinds');
+check('切库清空筛选', clientSource.includes('setRefFilters({})') && clientSource.includes('switchLib'), 'switchLib');
+check('筛选随检索提交', clientSource.includes('filters: filters &&'), 'filters');
+check('缩略图用服务端给的图链', clientSource.includes('src: work.thumbUrl'), 'thumbUrl');
+check('检索带分页参数', clientSource.includes('offset: at') && clientSource.includes('REF_PAGE = 24'), 'offset');
+check('有加载更多与总数', clientSource.includes('dpf-gallery-more') && clientSource.includes('refTotal'), 'more');
+
+// 图生图：粘贴板导入 + 主图/附加参考 + edit 模式
+check('支持粘贴板导入图片', clientSource.includes("window.addEventListener('paste'") && clientSource.includes('clipboardData'), 'paste');
+check('附加参考槽已渲染', clientSource.includes('dpf-refshots-row') && clientSource.includes('dpf-refshot-add'), 'shots');
+check('附加参考上限四张', clientSource.includes('previous.length >= 4 ? previous'), 'shots-cap');
+check('图生图走 edit 模式', clientSource.includes("mode: primary ? 'edit' : 'text'"), 'edit-mode');
+check('主图与参考图分别传 image/images', clientSource.includes('...(primary ? { image: primary } : {})') && clientSource.includes('...(gallery.length > 0 ? { images: gallery } : {})'), 'image/images');
+check('姿势图可转成内联图', clientSource.includes('remoteImageToDataUrl') && clientSource.includes('new File([blob]'), 'toDataUrl');
+check('姿势图条件默认关闭', clientSource.includes('useState(false)') && /\['usePoseRefs'\]|usePoseRefs: '.+'/.test(clientSource), 'usePoseRefs');
+
 if (fail.length) {
   console.error(`\n${fail.length} 项未通过：${fail.join('、')}`);
   process.exit(1);
