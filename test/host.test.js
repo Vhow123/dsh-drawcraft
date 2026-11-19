@@ -178,7 +178,9 @@ test('registers every route and all agent tools', { skip }, () => {
     '/api/prompt-forge/gallery',
     '/api/prompt-forge/optimize',
     '/api/prompt-forge/patch',
+    '/api/prompt-forge/render',
     '/api/prompt-forge/stop',
+    '/api/prompt-forge/targets',
   ]);
   assert.deepEqual([...tools.keys()], [
     'optimize_image_prompt',
@@ -205,6 +207,97 @@ test('gallery route exposes library metadata without touching the network', { sk
   assert.deepEqual(body.libs.pose.kinds, ['体系', '角度', '分类']);
   assert.equal(body.libs.pose.depth, true);
   assert.deepEqual(body.libs.portrait.kinds, ['分区', '发长', '发型名称']);
+});
+
+test('image targets never echo the api key back to the panel', { skip }, async () => {
+  const saved = await call('/api/prompt-forge/targets', {
+    action: 'save',
+    target: { label: 'demo-target', baseUrl: 'http://127.0.0.1:9/v1', apiKey: 'sk-secret-value-1234', models: ['demo-image'] },
+  });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.ok, true);
+  const first = saved.body.targets.find((item) => item.label === 'demo-target');
+  assert.ok(first, 'target should be saved');
+  assert.equal(first.apiKey, undefined);
+  assert.equal(first.keyHint, 'sk-s****1234');
+  assert.equal(first.hasKey, true);
+  assert.deepEqual(first.models, ['demo-image']);
+
+  const removed = await call('/api/prompt-forge/targets', { action: 'remove', id: first.id });
+  assert.equal(removed.body.ok, true);
+  assert.equal(removed.body.targets.some((item) => item.id === first.id), false);
+});
+
+test('render route refuses an unknown target instead of guessing', { skip }, async () => {
+  const { status, body } = await call('/api/prompt-forge/render', { targetId: 'nope', prompt: 'x' });
+  assert.equal(status, 200);
+  assert.equal(body.ok, false);
+  assert.equal(body.code, 'target-missing');
+});
+
+test('render relays to the configured endpoint', { skip }, async () => {
+  const { createServer } = await import('node:http');
+  const seen = [];
+  const server = createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      seen.push({ url: req.url, auth: req.headers.authorization, bytes: Buffer.concat(chunks).length });
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ data: [{ b64_json: 'aGVsbG8=' }] }));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  try {
+    const saved = await call('/api/prompt-forge/targets', {
+      action: 'save',
+      target: { label: 'relay-demo', baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: 'sk-relay', models: ['m1'] },
+    });
+    const id = (saved.body.targets.find((item) => item.label === 'relay-demo') || {}).id;
+    assert.ok(id, 'target must exist before relaying');
+    const out = await call('/api/prompt-forge/render', { targetId: id, prompt: 'a paper boat', mode: 'text' });
+    assert.equal(out.body.ok, true);
+    assert.equal(out.body.images[0].b64, 'aGVsbG8=');
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].url, '/v1/images/generations');
+    assert.equal(seen[0].auth, 'Bearer sk-relay');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('render sends a multipart edit when a subject image is attached', { skip }, async () => {
+  const { createServer } = await import('node:http');
+  const seen = [];
+  const server = createServer((req, res) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8');
+      seen.push({ url: req.url, type: req.headers['content-type'] || '', hasImage: raw.includes('name="image"'), hasExtras: raw.includes('name="image[]"') });
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ data: [{ b64_json: 'aGVsbG8=' }] }));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  const px = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  try {
+    const saved = await call('/api/prompt-forge/targets', {
+      action: 'save',
+      target: { label: 'edit-demo', baseUrl: `http://127.0.0.1:${port}/v1`, models: ['m1'] },
+    });
+    const id = (saved.body.targets.find((item) => item.label === 'edit-demo') || {}).id;
+    const out = await call('/api/prompt-forge/render', { targetId: id, prompt: 'keep her, change the pose', mode: 'edit', image: px, images: [px] });
+    assert.equal(out.body.ok, true);
+    assert.equal(seen[0].url, '/v1/images/edits');
+    assert.ok(seen[0].type.startsWith('multipart/form-data'), 'edit must be multipart');
+    assert.equal(seen[0].hasImage, true);
+    assert.equal(seen[0].hasExtras, true);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 test('optimize rewrites midjourney switches instead of trusting the model', { skip }, async () => {

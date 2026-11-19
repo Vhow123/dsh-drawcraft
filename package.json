@@ -1,8 +1,8 @@
 {
   "name": "dsh-image-prompt-forge",
-  "version": "1.3.0",
+  "version": "1.3.5",
   "type": "module",
-  "description": "提示词工坊：把模糊的生图想法整理成可直接投喂给图像模型的提示词，支持 6 种目标模型方言、18 种视觉风格、字段级拆解与历史记录；内置 4,345 条中文参考库（姿势/服装/人像，含深度图与种类筛选），可选参考后不再靠模型瞎编动作；并支持粘贴板导入参考图与图生图（主图走 image、附加参考走 images，直连本机 dsh-imagegen）",
+  "description": "把想法拆成可直接执行的生图提示词：六种方言、参考图库（姿势/服装/人像）、粘贴板导入与图生图，并支持自带 OpenAI 兼容的生图端点（密钥只存本机）。",
   "license": "MIT",
   "author": "Vhow123",
   "keywords": [
@@ -18,7 +18,9 @@
     "prompt-edit",
     "pose-reference",
     "controlnet",
-    "reference-gallery"
+    "reference-gallery",
+    "bring-your-own-endpoint",
+    "image-edits"
   ],
   "repository": {
     "type": "git",

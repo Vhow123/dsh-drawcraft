@@ -177,10 +177,32 @@ check('有加载更多与总数', clientSource.includes('dpf-gallery-more') && c
 check('支持粘贴板导入图片', clientSource.includes("window.addEventListener('paste'") && clientSource.includes('clipboardData'), 'paste');
 check('附加参考槽已渲染', clientSource.includes('dpf-refshots-row') && clientSource.includes('dpf-refshot-add'), 'shots');
 check('附加参考上限四张', clientSource.includes('previous.length >= 4 ? previous'), 'shots-cap');
-check('图生图走 edit 模式', clientSource.includes("mode: primary ? 'edit' : 'text'"), 'edit-mode');
-check('主图与参考图分别传 image/images', clientSource.includes('...(primary ? { image: primary } : {})') && clientSource.includes('...(gallery.length > 0 ? { images: gallery } : {})'), 'image/images');
+check('图生图走 edit 模式', clientSource.includes("mode: subject ? 'edit' : 'text'"), 'edit-mode');
+check('主图与参考图分别传 image/images', clientSource.includes('...(subject ? { image: subject } : {})') && clientSource.includes('...(gallery.length > 0 ? { images: gallery } : {})'), 'image/images');
 check('姿势图可转成内联图', clientSource.includes('remoteImageToDataUrl') && clientSource.includes('new File([blob]'), 'toDataUrl');
 check('姿势图条件默认关闭', clientSource.includes('useState(false)') && /\['usePoseRefs'\]|usePoseRefs: '.+'/.test(clientSource), 'usePoseRefs');
+
+// 深度图去审核：灰度检测 + 等高线线稿 + 被拒重试
+check('被拒后自动转线稿重试', clientSource.includes('contourDataUrl(primary)') && clientSource.includes("neutralize && primary && !note"), 'neutralize');
+check('不再按灰度预判转线稿', !/neutralize && \(await isFlatGray/.test(clientSource), 'no-preconvert');
+check('主图槽空时把附加参考提成主图', clientSource.includes('if (!primary && gallery.length > 0) primary = gallery.shift()'), 'promote');
+check('裸提示词补写实约束', clientSource.includes('PHOTO_NOTE') && clientSource.includes('bare ? PHOTO_NOTE'), 'photo-note');
+check('线稿开关默认开', clientSource.includes('const [neutralize, setNeutralize] = useState(true)'), 'neutralize-state');
+check('被审核拒绝时降级重试一次', clientSource.includes("failure?.code === 'upstream-rejected'"), 'retry');
+check('线稿附带说明前缀', clientSource.includes('CONTOUR_NOTE') && clientSource.includes('深度等值线图'), 'contour-note');
+check('等高线算法可独立调用', clientSource.includes('function buildContourMask('), 'contour-mask');
+
+// 不必先优化就能出图
+check('右侧空态就有出图按钮', clientSource.includes('renderHint') && clientSource.includes('!previewError &&'), 'render-empty');
+check('左栏也有出图按钮', (clientSource.match(/void renderOne\(\)/g) || []).length >= 3, 'render-left');
+check('提示词可退回想法与参考名', clientSource.includes("result?.prompt || idea || fallback"), 'fallback');
+
+// 想法输入框收窄 + 自带生图端点
+check('想法输入框已收窄', clientSource.includes('.dpf-textarea.dpf-idea{min-height:84px}'), 'idea-height');
+check('可自己添加生图模型', clientSource.includes('dpf-target-form') && clientSource.includes("action: 'save'"), 'targets-save');
+check('出图请求不带密钥', !/targetId[^}]*apiKey/.test(clientSource), 'no-key-in-render');
+check('出图来源可切换', clientSource.includes('sourceOptions') && clientSource.includes('currentSource'), 'source');
+check('自定义端点走插件转发', clientSource.includes("activeTarget ? `${API}/render` : GENERATE_API"), 'relay');
 
 if (fail.length) {
   console.error(`\n${fail.length} 项未通过：${fail.join('、')}`);

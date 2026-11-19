@@ -37,7 +37,7 @@ window.__ModuleLoader__.load({
     const STORE_KEY = 'dsh-image-prompt-forge:v1';
     const HISTORY_LIMIT = 24;
     // 页脚显示，用来一眼判断浏览器加载的是哪一版 bundle（缓存排查用）。
-    const BUILD = '1.3.0';
+    const BUILD = '1.3.5';
 
     // Labels are duplicated from engine.js on purpose: client.js is loaded as a
     // separate bundle and cannot import ESM. The host catalog (fetched on open)
@@ -157,8 +157,13 @@ window.__ModuleLoader__.load({
       kindsLess: '收起',
       galleryMore: '加载更多',
       shotAdd: '加一张参考图',
-      shotHint: 'Ctrl+V 直接粘贴剪贴板里的图；第一张当主体，其余当参考，最多四张。',
+      shotHint: 'Ctrl+V 直接粘贴剪贴板里的图；第一张当主体，其余当参考，最多四张。主图槽空着时第一张会自动顶上。',
       usePoseRefs: '把手上的姿势图也发过去',
+      neutralize: '主图被判违规时自动转线稿重试',
+      sketchNeedsWords: '主图被拒，已改发线稿重试。线稿里没有长相和衣服，建议先在上面的框里写清人物，或用上面的「反推」拿到描述。',
+      rejectedHint: '这次没出图。上面那张是上一次的结果，不是新的。真人照片配「性感系」姿势基本都会被上游的内容安全规则挡掉，换「标准系」的姿势、或者干脆不传主图走纯文生图，通常就过了。',
+      staleTag: '上一次的结果，这次没出图',
+      neutralized: '主图偏灰度，已转成深度线稿再发。',
       shotLoadedNoModel: '图已载入，可以直接拿去图生图。',
       renderEdit: '图生图',
       model: '优化模型',
@@ -194,13 +199,27 @@ window.__ModuleLoader__.load({
       fromPatch: '改一句',
       preview: '试一张',
       previewHint: '用本机生图插件按当前提示词出一张图',
+      renderHint: '不用先优化：直接用你写的想法（或选中的参考）出图',
       generating: '出图中…',
       previewTitle: '预览图',
       noImagegen: '没找到本机的生图插件（dsh-imagegen），装好后这里就能直接出图',
       hostStale: '宿主还在跑旧版本的插件，退出桌面端重新打开一次就能用了',
       imageChannel: '出图渠道',
       imageModel: '出图模型',
-      imageModelHint: '出图用的是本机生图插件里的渠道与模型，和上面的对话模型互不影响',
+      imageModelHint: '出图用的渠道与模型，和上面的对话模型互不影响',
+      imageSource: '出图模型来自',
+      sourceHost: '本机生图插件',
+      sourceEmpty: '还没配置',
+      targetAdd: '添加生图模型',
+      targetName: '给它起个名字（如 我的中转）',
+      targetKey: 'API 密钥（留空表示不改）',
+      targetTest: '测试并保存',
+      targetTesting: '测试中…',
+      targetSave: '保存',
+      targetRemove: '删掉这个',
+      targetSaved: '已保存',
+      targetNeedUrl: '地址要以 http(s):// 开头，模型名至少填一个',
+      targetHint: '填 OpenAI 兼容的生图接口地址，插件在本机转发，密钥只存在 ~/.dsh/prompt-forge-targets.json。',
       imageSize: '出图尺寸',
       imageQuality: '出图清晰度',
       sizeAuto: '跟随画幅',
@@ -278,6 +297,11 @@ window.__ModuleLoader__.load({
       shotAdd: 'add a reference image',
       shotHint: 'Paste with Ctrl+V. The first image is the subject, the rest are references (max 4).',
       usePoseRefs: 'also send the pose references',
+      neutralize: 'retry as line art if the image gets rejected by the upstream filter',
+      sketchNeedsWords: 'The image was rejected and retried as a sketch. A sketch carries no face or clothes — write the person in the box above first, or use describe to get a description.',
+      rejectedHint: 'Nothing was generated. The picture above is from the previous run, not a new one. A real-photo subject with a "sexy" pose gets blocked by the upstream content filter almost every time — switch to a "standard" pose, or drop the subject image and go text-to-image.',
+      staleTag: 'previous result — this run failed',
+      neutralized: 'The subject image was nearly grayscale, so it was sent as a depth line drawing.',
       shotLoadedNoModel: 'Image loaded — ready for image-to-image.',
       renderEdit: 'image-to-image',
       model: 'Optimizer model',
@@ -313,6 +337,7 @@ window.__ModuleLoader__.load({
       fromPatch: 'tweaked',
       preview: 'Try one',
       previewHint: 'Render one image from this prompt with the local image plugin',
+      renderHint: 'No optimization needed: render straight from your idea (or the selected references)',
       generating: 'Rendering…',
       previewTitle: 'Preview',
       noImagegen: 'No local image plugin (dsh-imagegen) found; install it to render from here',
@@ -320,6 +345,19 @@ window.__ModuleLoader__.load({
       imageChannel: 'Image channel',
       imageModel: 'Image model',
       imageModelHint: 'Rendering uses the channel and model configured in the local image plugin; the chat model above is unrelated.',
+      imageSource: 'Image model from',
+      sourceHost: 'Local image plugin',
+      sourceEmpty: 'not configured',
+      targetAdd: 'Add an image model',
+      targetName: 'A name for it (e.g. my relay)',
+      targetKey: 'API key (leave blank to keep the current one)',
+      targetTest: 'Test and save',
+      targetTesting: 'Testing…',
+      targetSave: 'Save',
+      targetRemove: 'Remove this',
+      targetSaved: 'Saved',
+      targetNeedUrl: 'The URL must start with http(s):// and you need at least one model name',
+      targetHint: 'Point it at any OpenAI-compatible image endpoint. The plugin relays the call locally; the key only lives in ~/.dsh/prompt-forge-targets.json.',
       imageSize: 'Size',
       imageQuality: 'Quality',
       sizeAuto: 'Follow aspect',
@@ -362,7 +400,14 @@ window.__ModuleLoader__.load({
 .dpf-textarea,.dpf-input,.dpf-select{width:100%;color:inherit;background:var(--dsw-alias-bg-input,#ffffff07);border:1px solid var(--dsw-alias-border-default,#ffffff18);border-radius:8px;padding:9px 11px;font:inherit;outline:none;transition:border-color .12s}
 .dpf-textarea:focus,.dpf-input:focus,.dpf-select:focus{border-color:var(--dsw-alias-border-focused,#8d8d95)}
 .dpf-textarea{resize:vertical;min-height:132px;line-height:1.6}
-.dpf-textarea.dpf-idea{min-height:150px}
+.dpf-textarea.dpf-idea{min-height:84px}
+.dpf-target-form{display:grid;gap:6px;margin-top:8px;padding:9px 10px;border:1px dashed var(--dsw-alias-border-default,#ffffff22);border-radius:9px;background:#ffffff05}
+.dpf-target-form .dpf-input{font-size:12px;padding:6px 9px}
+.dpf-target-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.dpf-target-msg{font-size:11px;color:var(--dsw-alias-text-secondary,#9a9aa2);word-break:break-word}
+.dpf-target-msg.is-bad{color:var(--dsw-alias-text-danger,#ef767a)}
+.dpf-icon-btn{width:26px;height:26px;flex:none;border-radius:7px;border:1px dashed var(--dsw-alias-border-default,#ffffff2e);background:transparent;color:inherit;font-size:15px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0}
+.dpf-icon-btn:hover{background:#ffffff10}
 .dpf-select{-webkit-appearance:none;appearance:none;background-image:linear-gradient(45deg,transparent 50%,#888 50%),linear-gradient(135deg,#888 50%,transparent 50%);background-position:calc(100% - 15px) 50%,calc(100% - 10px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:28px}
 .dpf-select option{background:#222;color:#eee}
 .dpf-grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -418,6 +463,8 @@ window.__ModuleLoader__.load({
 .dpf-btn-ghost:hover:not(:disabled){color:var(--dsw-alias-text-primary,#ddd);background:var(--dsw-alias-bg-hover,#ffffff0d)}
 .dpf-btn-small{padding:5px 9px;font-size:11.5px;border-radius:7px}
 .dpf-error{margin:0;padding:9px 12px;border-radius:8px;color:var(--dsw-alias-text-danger,#ef767a);background:#ef767a14;font-size:12px;white-space:pre-wrap;word-break:break-word}
+.dpf-stale{margin:8px 0 0;padding:5px 10px;border-radius:7px;font-size:11px;letter-spacing:.02em;color:var(--dsw-alias-text-warning,#e0b25c);background:#e0b25c16;border:1px dashed #e0b25c55;display:inline-block}
+.dpf-preview.is-stale img{opacity:.55;filter:saturate(.6)}
 .dpf-warn{color:var(--dsw-alias-text-warning,#dfb66c);background:#dfb66c14}
 .dpf-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:var(--dsw-alias-text-secondary,#86868c);gap:8px;padding:40px 20px;min-height:280px}
 .dpf-empty svg{width:44px;height:44px;opacity:.35}
@@ -588,6 +635,179 @@ window.__ModuleLoader__.load({
           }
         }
 
+        /**
+         * 灰度/深度图当主图会被上游网关判成"淡化处理过的规避图"直接拒，
+         * 上色后中性姿势能过、性感系姿势仍被 NSFW 拦。
+         * 改成白底线条的深度等值线图（等高线）后，画面里只剩线，实测能正常出图。
+         */
+        const CONTOUR_NOTE = {
+          en: 'The reference is a depth-contour diagram: take only its silhouette and joint positions as the pose blueprint, and ignore the contour lines themselves — those are measurement lines, not a pattern printed on clothing.\n\n',
+          zh: '参考图是一张深度等值线图：只把它的轮廓与关节位置当作姿态蓝图，图上的线条本身要忽略——那些是测量线，不是衣服上的花纹。\n\n',
+        };
+
+        /**
+         * 没有任何像样提示词时的兜底。
+         * 只喂一句「坐姿・抱腿打开」进去，图像模型会自己挑风格——它挑的是插画。
+         */
+        const PHOTO_NOTE = {
+          en: 'Photorealistic photograph of a real adult woman, real skin texture, natural light, sharp focus. No illustration, no anime, no cartoon, no 3D render, no doll-like face.\n\n',
+          zh: '真人摄影，真实成年女性，真实皮肤质感，自然光，清晰对焦。不要插画，不要动漫，不要卡通，不要 3D 渲染，不要娃娃脸。\n\n',
+        };
+
+        /**
+         * 被拒后改发线稿时必须说的话。
+         * 线稿里没有肤色、脸、衣服——不说清楚，模型就照着线条画成插画了。
+         */
+        const SKETCH_NOTE = {
+          en: 'The attached reference is only a pose sketch: take nothing from it except the silhouette and joint positions. Rebuild the person as a real human photograph, keeping the appearance you were told above. Do not output line art, do not output an illustration.\n\n',
+          zh: '附上的参考图只是一张姿态线稿：只从它取轮廓与关节位置，其余一概不管。人物要按上面的描述还原成真人摄影。不要输出线稿，不要输出插画。\n\n',
+        };
+
+        function loadImageElement(dataUrl) {
+          return new Promise((resolve, reject) => {
+            const image = new Image();
+            image.onload = () => resolve(image);
+            image.onerror = () => reject(new Error('image decode failed'));
+            image.src = dataUrl;
+          });
+        }
+
+        function imagePixels(dataUrl, maxEdge) {
+          return loadImageElement(dataUrl).then((image) => {
+            const naturalWidth = image.naturalWidth || image.width || 0;
+            const naturalHeight = image.naturalHeight || image.height || 0;
+            if (!naturalWidth || !naturalHeight) throw new Error('image has no size');
+            const scale = Math.min(1, maxEdge / Math.max(naturalWidth, naturalHeight));
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round(naturalWidth * scale));
+            canvas.height = Math.max(1, Math.round(naturalHeight * scale));
+            const context = canvas.getContext('2d', { willReadFrequently: true });
+            context.drawImage(image, 0, 0, canvas.width, canvas.height);
+            return { canvas, context, width: canvas.width, height: canvas.height };
+          });
+        }
+
+        function grayStats(pixels) {
+          const { context, width, height } = pixels;
+          const data = context.getImageData(0, 0, width, height).data;
+          const count = width * height;
+          const gray = new Float32Array(count);
+          let lo = 1;
+          let hi = 0;
+          for (let i = 0; i < count; i += 1) {
+            const at = i * 4;
+            const value = (0.299 * data[at] + 0.587 * data[at + 1] + 0.114 * data[at + 2]) / 255;
+            gray[i] = value;
+            if (value < lo) lo = value;
+            if (value > hi) hi = value;
+          }
+          let saturation = 0;
+          let sampled = 0;
+          const step = Math.max(1, Math.floor(count / 4000));
+          for (let i = 0; i < count; i += step) {
+            const at = i * 4;
+            const max = Math.max(data[at], data[at + 1], data[at + 2]);
+            const min = Math.min(data[at], data[at + 1], data[at + 2]);
+            saturation += max > 0 ? (max - min) / max : 0;
+            sampled += 1;
+          }
+          return { gray, lo, hi, saturation: sampled ? saturation / sampled : 0, width, height, count };
+        }
+
+        /**
+         * 只判「这张图是不是灰度」——不再拿它决定要不要转线稿。
+         * 真人照片撞上高调棚拍时饱和度也会很低，预判转线稿会把真人变成线稿，
+         * 出来就是卡通。转线稿只在被上游明确 reject 之后才做。
+         */
+        async function isFlatGray(dataUrl) {
+          try {
+            const stats = grayStats(await imagePixels(dataUrl, 384));
+            return stats.saturation < 0.08 && stats.hi - stats.lo > 0.12;
+          } catch {
+            return false;
+          }
+        }
+
+        function buildContourMask(gray, width, height, lo, hi, levels) {
+          const count = width * height;
+          const span = Math.max(0.08, hi - lo);
+          const bands = Math.max(4, Math.min(32, levels || 16));
+          const level = new Uint8Array(count);
+          for (let i = 0; i < count; i += 1) {
+            const ratio = (gray[i] - lo) / span;
+            level[i] = Math.max(0, Math.min(bands - 1, Math.floor(ratio * bands)));
+          }
+          const edge = new Uint8Array(count);
+          for (let y = 0; y < height; y += 1) {
+            for (let x = 0; x < width; x += 1) {
+              const i = y * width + x;
+              const value = level[i];
+              if ((x > 0 && level[i - 1] !== value) || (y > 0 && level[i - width] !== value)) edge[i] = 1;
+            }
+          }
+          const solidLine = lo + span * 0.06;
+          const inside = new Uint8Array(count);
+          for (let i = 0; i < count; i += 1) inside[i] = gray[i] > solidLine ? 1 : 0;
+          for (let y = 0; y < height; y += 1) {
+            for (let x = 0; x < width; x += 1) {
+              const i = y * width + x;
+              if (!inside[i]) continue;
+              if (x === 0 || y === 0 || !inside[i - 1] || !inside[i - width]) edge[i] = 1;
+            }
+          }
+          // 线加粗一像素，缩到 1024 以内后不断线。
+          const fat = new Uint8Array(edge);
+          for (let y = 0; y < height; y += 1) {
+            for (let x = 0; x < width; x += 1) {
+              const i = y * width + x;
+              if (edge[i] !== 1) continue;
+              if (x > 0) fat[i - 1] = 1;
+              if (x + 1 < width) fat[i + 1] = 1;
+              if (y > 0) fat[i - width] = 1;
+              if (y + 1 < height) fat[i + width] = 1;
+            }
+          }
+          return fat;
+        }
+
+        async function contourDataUrl(dataUrl, maxEdge = 1200) {
+          const pixels = await imagePixels(dataUrl, maxEdge);
+          const { canvas, context, width, height } = pixels;
+          const stats = grayStats(pixels);
+          const fat = buildContourMask(stats.gray, width, height, stats.lo, stats.hi, 16);
+          // 3×3 盒式模糊当抗锯齿：线条边缘留灰阶。硬边纯黑白的线稿会被判成
+          // 「处理过的图」，软一点的灰线才像技术制图 —— 实测这条差别直接决定过不过。
+          const soft = new Float32Array(stats.count);
+          for (let y = 0; y < height; y += 1) {
+            for (let x = 0; x < width; x += 1) {
+              let sum = 0;
+              let seen = 0;
+              for (let dy = -1; dy <= 1; dy += 1) {
+                const yy = y + dy;
+                if (yy < 0 || yy >= height) continue;
+                for (let dx = -1; dx <= 1; dx += 1) {
+                  const xx = x + dx;
+                  if (xx < 0 || xx >= width) continue;
+                  sum += fat[yy * width + xx];
+                  seen += 1;
+                }
+              }
+              soft[y * width + x] = seen > 0 ? sum / seen : 0;
+            }
+          }
+          const out = context.createImageData(width, height);
+          for (let i = 0; i < stats.count; i += 1) {
+            const at = i * 4;
+            const value = 252 - Math.round(Math.min(1, soft[i] * 1.5) * 165);
+            out.data[at] = value;
+            out.data[at + 1] = value + 1;
+            out.data[at + 2] = value + 4;
+            out.data[at + 3] = 255;
+          }
+          context.putImageData(out, 0, 0);
+          return canvas.toDataURL('image/png');
+        }
+
         function readStore() {
           try {
             const raw = localStorage.getItem(STORE_KEY);
@@ -716,12 +936,15 @@ window.__ModuleLoader__.load({
           const [refShots, setRefShots] = useState([]);
           // 是否把参考库里勾选的姿势/服装图一起当作图像条件发过去。
           const [usePoseRefs, setUsePoseRefs] = useState(false);
+          // 主图是灰度/深度图时先转成等高线线稿再发，绕开上游的图片审核。
+          const [neutralize, setNeutralize] = useState(true);
           const [describing, setDescribing] = useState(false);
           const [dragOver, setDragOver] = useState(false);
           const [patchText, setPatchText] = useState('');
           const [patching, setPatching] = useState(false);
           const [preview, setPreview] = useState([]);
           const [previewError, setPreviewError] = useState('');
+          const [previewStale, setPreviewStale] = useState(false);
           const [generating, setGenerating] = useState(false);
           // 出图尺寸与清晰度：'auto' 时尺寸跟随结果的画面比例，清晰度交给渠道默认。
           const [imageSize, setImageSize] = useState(stored.imageSize || 'auto');
@@ -739,6 +962,15 @@ window.__ModuleLoader__.load({
           const extraRef = useRef(null);
           const probeModelsRef = useRef(null);
           const [copied, copy] = useCopy();
+
+          // 自带的生图端点：用户自己填地址、密钥、模型名，插件服务端转发。
+          const [targets, setTargets] = useState([]);
+          const [source, setSource] = useState('host');
+          const [targetOpen, setTargetOpen] = useState(false);
+          const [targetDraft, setTargetDraft] = useState({ label: '', baseUrl: '', apiKey: '', models: '' });
+          const [targetBusy, setTargetBusy] = useState(false);
+          const [targetMsg, setTargetMsg] = useState('');
+          const [targetBad, setTargetBad] = useState(false);
 
           const mounted = useRef(true);
           const runIdRef = useRef('');
@@ -1469,9 +1701,121 @@ window.__ModuleLoader__.load({
             };
           }, []);
 
+          const callTargets = async (payload) => {
+            const response = await fetch(`${API}/targets`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const body = await response.json().catch(() => null);
+            if (body && Array.isArray(body.targets)) setTargets(body.targets);
+            return body;
+          };
+
+          useEffect(() => {
+            let alive = true;
+            (async () => {
+              try {
+                const response = await fetch(`${API}/targets`, {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: '{"action":"list"}',
+                });
+                const body = await response.json().catch(() => null);
+                if (!alive || !body?.ok) return;
+                setTargets(Array.isArray(body.targets) ? body.targets : []);
+              } catch {
+                /* 宿主没起来时这一块留空就行 */
+              }
+            })();
+            return () => {
+              alive = false;
+            };
+          }, []);
+
+          const saveTarget = async () => {
+            if (targetBusy) return;
+            setTargetBusy(true);
+            setTargetMsg('');
+            try {
+              const draft = { ...targetDraft, label: targetDraft.label.trim() || targetDraft.baseUrl.trim() };
+              const body = await callTargets({ action: 'save', target: draft });
+              if (!body?.ok) {
+                setTargetBad(true);
+                setTargetMsg(body?.message || '保存失败');
+                return;
+              }
+              const saved = (body.targets || []).find((item) => item.label === draft.label) || (body.targets || [])[0];
+              if (saved) {
+                setSource(saved.id);
+                setImageModel(saved.models[0] || '');
+              }
+              setTargetBad(false);
+              setTargetMsg(t('targetSaved'));
+              setTargetDraft({ label: '', baseUrl: '', apiKey: '', models: '' });
+              setTargetOpen(false);
+            } catch (error) {
+              setTargetBad(true);
+              setTargetMsg(String(error?.message || error));
+            } finally {
+              setTargetBusy(false);
+            }
+          };
+
+          const testTarget = async () => {
+            if (targetBusy) return;
+            setTargetBusy(true);
+            setTargetMsg('');
+            try {
+              const draftModels = targetDraft.models
+                .split(/[,，;；\s]+/)
+                .map((item) => item.trim())
+                .filter(Boolean);
+              if (!targetDraft.baseUrl.trim() || draftModels.length === 0) {
+                setTargetBad(true);
+                setTargetMsg(t('targetNeedUrl'));
+                return;
+              }
+              const body = await callTargets({
+                action: 'save',
+                target: { ...targetDraft, label: targetDraft.label.trim() || targetDraft.baseUrl.trim(), models: draftModels },
+              });
+              const saved = (body?.targets || []).find((item) => item.label === (targetDraft.label.trim() || targetDraft.baseUrl.trim())) || (body?.targets || [])[0];
+              if (!saved) {
+                setTargetBad(true);
+                setTargetMsg(body?.message || '保存失败');
+                return;
+              }
+              const probe = await callTargets({ action: 'test', id: saved.id });
+              setSource(saved.id);
+              setImageModel(saved.models[0] || '');
+              setTargetBad(!probe?.ok);
+              const found = Array.isArray(probe?.models) && probe.models.length > 0 ? ` 可用模型：${probe.models.slice(0, 6).join(', ')}` : '';
+              setTargetMsg(`${probe?.message || ''}${found}`.trim());
+            } catch (error) {
+              setTargetBad(true);
+              setTargetMsg(String(error?.message || error));
+            } finally {
+              setTargetBusy(false);
+            }
+          };
+
+          const removeTarget = async (id) => {
+            const body = await callTargets({ action: 'remove', id }).catch(() => null);
+            if (body?.ok && source === id) setSource('host');
+          };
+
           const activeChannel = imageChannels.find((item) => item.id === imageChannelId) ?? imageChannels[0] ?? null;
           const imageModelOptions = activeChannel ? activeChannel.models : [];
-          const effectiveImageModel = imageModelOptions.includes(imageModel) ? imageModel : imageModelOptions[0] ?? '';
+          const activeTarget = targets.find((item) => item.id === source) ?? null;
+          // 「来源」= 真正拿去请求的那个端点：宿主的每个渠道，加用户自己加的目标。
+          const sourceOptions = [
+            ...imageChannels.map((item) => ({ id: `host:${item.id}`, label: `${t('sourceHost')} · ${item.name}`, models: item.models })),
+            ...targets.map((item) => ({ id: item.id, label: item.label, models: item.models })),
+          ];
+          const currentSource = activeTarget ? activeTarget.id : activeChannel ? `host:${activeChannel.id}` : '';
+          const imageModelChoices = activeTarget ? activeTarget.models : imageModelOptions;
+          const effectiveImageModel = imageModelChoices.includes(imageModel) ? imageModel : imageModelChoices[0] ?? '';
 
           // 设置里的 models 是用户配置的目录，上游未必都认；探一次真实可用列表再校正。
           const probeModels = async (channelId) => {
@@ -1537,13 +1881,24 @@ window.__ModuleLoader__.load({
           };
 
           const renderOne = useCallback(async () => {
-            const prompt = (editedPrompt || result?.prompt || '').trim();
+            // 没优化过也能出图：退回左边的想法，再退回选中的参考条目（名称 + 标签）。
+            const fallback = refs
+              .map((item) =>
+                [
+                  item?.name,
+                  Array.isArray(item?.tags) ? item.tags.slice(0, 6).join('、') : '',
+                ]
+                  .filter(Boolean)
+                  .join('，'),
+              )
+              .filter(Boolean)
+              .join('；');
+            const prompt = (editedPrompt || result?.prompt || idea || fallback || '').trim();
             if (!prompt || generating) return;
             setGenerating(true);
             setPreviewError('');
             try {
               // 图生图：导入的主图作为 image，附加参考与姿势图作为 images（上限四张）。
-              const primary = imageRef.current?.data || '';
               const gallery = refShots.map((shot) => shot?.data).filter(Boolean).slice(0, 4);
               if (usePoseRefs && refs.length > 0 && gallery.length < 4) {
                 for (const item of refs) {
@@ -1553,12 +1908,19 @@ window.__ModuleLoader__.load({
                   if (data) gallery.push(data);
                 }
               }
-              const response = await fetch(GENERATE_API, {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({
-                  mode: primary ? 'edit' : 'text',
-                  prompt: primary ? `${EDIT_PREFIX[language] || EDIT_PREFIX.en}${prompt}` : prompt,
+              let primary = imageRef.current?.data || '';
+              // 主图槽空着、附加位里却有图时，把第一张提成主图。
+              // 不然请求会退化成纯文生图，模型只看到一句「坐姿・抱腿打开」就自由发挥成动漫了。
+              if (!primary && gallery.length > 0) primary = gallery.shift();
+              let note = '';
+              // 没写想法、也没优化过时，只拿参考名当提示词太单薄，补一句写实约束。
+              const bare = !editedPrompt.trim() && !(result && result.prompt) && !idea.trim();
+              const submit = async (subject, notes) => {
+                const shared = {
+                  mode: subject ? 'edit' : 'text',
+                  prompt: subject
+                    ? `${notes || EDIT_PREFIX[language] || EDIT_PREFIX.en}${prompt}`
+                    : `${bare ? PHOTO_NOTE[language] || PHOTO_NOTE.en : ''}${prompt}`,
                   size:
                     imageSize !== 'auto'
                       ? imageSize
@@ -1567,30 +1929,63 @@ window.__ModuleLoader__.load({
                         : 'auto',
                   quality: imageQuality,
                   n: 1,
-                  ...(primary ? { image: primary } : {}),
+                  ...(subject ? { image: subject } : {}),
                   ...(gallery.length > 0 ? { images: gallery } : {}),
-                  ...(activeChannel ? { channelId: activeChannel.id } : {}),
                   ...(effectiveImageModel ? { model: effectiveImageModel } : {}),
-                }),
-              });
-              const body = await response.json().catch(() => null);
-              if (!response.ok) {
-                if (response.status === 404) throw new Error(t('noImagegen'));
-                throw new Error((body && body.message) || `HTTP ${response.status}`);
+                };
+                // 自定义端点是「来源」里选的，交给插件自己转发；宿主的走 dsh-imagegen。
+                const endpoint = activeTarget ? `${API}/render` : GENERATE_API;
+                const payload = activeTarget ? { ...shared, targetId: activeTarget.id } : { ...shared, ...(activeChannel ? { channelId: activeChannel.id } : {}) };
+                const response = await fetch(endpoint, {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify(payload),
+                });
+                const body = await response.json().catch(() => null);
+                if (!response.ok) {
+                  if (response.status === 404) throw new Error(t('noImagegen'));
+                  const rejected = new Error((body && body.message) || `HTTP ${response.status}`);
+                  rejected.code = (body && body.code) || '';
+                  throw rejected;
+                }
+                if (!body || body.ok === false) {
+                  const rejected = new Error((body && body.message) || t('previewFailed'));
+                  rejected.code = (body && body.code) || '';
+                  throw rejected;
+                }
+                return body;
+              };
+              let body = null;
+              try {
+                body = await submit(primary, note);
+              } catch (failure) {
+                // 主图被审核拦下来时，改投一张等高线线稿重试一次。
+                if (neutralize && primary && !note && failure?.code === 'upstream-rejected') {
+                  const line = await contourDataUrl(primary);
+                  const head = `${EDIT_PREFIX[language] || EDIT_PREFIX.en}${SKETCH_NOTE[language] || SKETCH_NOTE.en}${PHOTO_NOTE[language] || PHOTO_NOTE.en}`;
+                  body = await submit(line, head);
+                  if (bare) setNotice(t('sketchNeedsWords'));
+                } else {
+                  throw failure;
+                }
               }
-              if (!body || body.ok === false) throw new Error((body && body.message) || t('previewFailed'));
               const shots = (Array.isArray(body.images) ? body.images : [])
                 .filter((item) => item && typeof item.b64 === 'string' && item.b64)
                 .map((item) => ({ b64: item.b64, mime: item.mime || 'image/png' }));
               if (shots.length === 0) throw new Error(t('previewFailed'));
               setPreview(shots);
+              setPreviewStale(false);
             } catch (failure) {
               const message = failure?.message || String(failure);
-              setPreviewError(/404|Failed to fetch|not found|NetworkError/i.test(message) ? t('noImagegen') : message);
+              const rejected = failure?.code === 'upstream-rejected';
+              const friendly = /404|Failed to fetch|not found|NetworkError/i.test(message) ? t('noImagegen') : message;
+              setPreviewError(rejected ? `${friendly}\n\n${t('rejectedHint')}` : friendly);
+              // 旧图还在窗口里，不标一下会被当成这次出的。
+              setPreviewStale(true);
             } finally {
               setGenerating(false);
             }
-          }, [editedPrompt, result, generating, t, activeChannel, effectiveImageModel, imageSize, imageQuality, refShots, usePoseRefs, refs, language]);
+          }, [editedPrompt, result, generating, t, activeChannel, activeTarget, effectiveImageModel, imageSize, imageQuality, refShots, usePoseRefs, neutralize, refs, idea, language]);
 
           const onDropImage = useCallback(
             (event) => {
@@ -1871,6 +2266,16 @@ window.__ModuleLoader__.load({
                           }),
                           h('span', null, `${t('usePoseRefs')}（${refs.length}）`),
                         ),
+                      h(
+                        'label',
+                        { className: 'dpf-check' },
+                        h('input', {
+                          type: 'checkbox',
+                          checked: neutralize,
+                          onChange: (event) => setNeutralize(event.target.checked),
+                        }),
+                        h('span', null, t('neutralize')),
+                      ),
                     ),
                     galleryBox,
                   ),
@@ -1956,40 +2361,144 @@ window.__ModuleLoader__.load({
                         [1, 2, 3].map((value) => h('option', { key: value, value }, String(value))),
                       ),
                     ),
-                    imageChannels.length > 0 &&
+                    h(
+                      'div',
+                      { className: 'dpf-grid2', style: { marginTop: 8 }, title: t('imageModelHint') },
                       h(
                         'div',
-                        { className: 'dpf-grid2', style: { marginTop: 8 }, title: t('imageModelHint') },
+                        null,
+                        h('label', { className: 'dpf-label' }, t('imageSource')),
                         h(
                           'div',
-                          null,
-                          h('label', { className: 'dpf-label' }, t('imageChannel')),
+                          { style: { display: 'flex', gap: 6, alignItems: 'center' } },
                           h(
                             'select',
                             {
                               className: 'dpf-select',
-                              value: activeChannel ? activeChannel.id : '',
-                              onChange: (event) => pickImageChannel(event.target.value),
+                              value: currentSource,
+                              disabled: sourceOptions.length === 0,
+                              onChange: (event) => {
+                                const raw = event.target.value;
+                                if (raw.startsWith('host:')) {
+                                  setSource('host');
+                                  pickImageChannel(raw.slice(5));
+                                  return;
+                                }
+                                setSource(raw);
+                                setImageModel((targets.find((item) => item.id === raw) || {}).models?.[0] || '');
+                              },
                             },
-                            imageChannels.map((item) => h('option', { key: item.id, value: item.id }, item.name)),
+                            sourceOptions.length === 0
+                              ? [h('option', { key: 'none', value: '' }, t('sourceEmpty'))]
+                              : sourceOptions.map((item) => h('option', { key: item.id, value: item.id }, item.label)),
                           ),
-                        ),
-                        h(
-                          'div',
-                          null,
-                          h('label', { className: 'dpf-label' }, t('imageModel')),
                           h(
-                            'select',
+                            'button',
                             {
-                              className: 'dpf-select',
-                              value: effectiveImageModel,
-                              onChange: (event) => pickImageModel(event.target.value),
+                              type: 'button',
+                              className: 'dpf-icon-btn',
+                              title: t('targetAdd'),
+                              onClick: () => {
+                                setTargetOpen((value) => !value);
+                                setTargetMsg('');
+                              },
                             },
-                            imageModelOptions.map((item) => h('option', { key: item, value: item }, item)),
+                            targetOpen ? '×' : '+',
                           ),
                         ),
                       ),
-                    imageChannels.length > 0 &&
+                      h(
+                        'div',
+                        null,
+                        h('label', { className: 'dpf-label' }, t('imageModel')),
+                        h(
+                          'select',
+                          {
+                            className: 'dpf-select',
+                            value: effectiveImageModel,
+                            disabled: imageModelChoices.length === 0,
+                            onChange: (event) => pickImageModel(event.target.value),
+                          },
+                          imageModelChoices.length === 0
+                            ? [h('option', { key: 'none', value: '' }, '—')]
+                            : imageModelChoices.map((item) => h('option', { key: item, value: item }, item)),
+                        ),
+                      ),
+                    ),
+                    targetOpen &&
+                      h(
+                        'div',
+                        { className: 'dpf-target-form' },
+                        h('input', {
+                          className: 'dpf-input',
+                          placeholder: t('targetName'),
+                          value: targetDraft.label,
+                          maxLength: 60,
+                          onChange: (event) => setTargetDraft({ ...targetDraft, label: event.target.value }),
+                        }),
+                        h('input', {
+                          className: 'dpf-input',
+                          placeholder: 'https://api.openai.com/v1',
+                          value: targetDraft.baseUrl,
+                          spellCheck: false,
+                          onChange: (event) => setTargetDraft({ ...targetDraft, baseUrl: event.target.value }),
+                        }),
+                        h('input', {
+                          className: 'dpf-input',
+                          type: 'password',
+                          placeholder: t('targetKey'),
+                          value: targetDraft.apiKey,
+                          onChange: (event) => setTargetDraft({ ...targetDraft, apiKey: event.target.value }),
+                        }),
+                        h('input', {
+                          className: 'dpf-input',
+                          placeholder: 'gpt-image-1, flux-1.1-pro',
+                          value: targetDraft.models,
+                          spellCheck: false,
+                          onChange: (event) => setTargetDraft({ ...targetDraft, models: event.target.value }),
+                        }),
+                        h(
+                          'div',
+                          { className: 'dpf-target-actions' },
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              className: 'dpf-btn',
+                              style: { padding: '5px 10px', fontSize: 12 },
+                              disabled: targetBusy,
+                              onClick: () => void testTarget(),
+                            },
+                            targetBusy ? t('targetTesting') : t('targetTest'),
+                          ),
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              className: 'dpf-btn',
+                              style: { padding: '5px 10px', fontSize: 12 },
+                              disabled: targetBusy,
+                              onClick: () => void saveTarget(),
+                            },
+                            t('targetSave'),
+                          ),
+                          activeTarget &&
+                            h(
+                              'button',
+                              {
+                                type: 'button',
+                                className: 'dpf-btn',
+                                style: { padding: '5px 10px', fontSize: 12 },
+                                onClick: () => void removeTarget(activeTarget.id),
+                              },
+                              t('targetRemove'),
+                            ),
+                        ),
+                        targetMsg &&
+                          h('div', { className: `dpf-target-msg${targetBad ? ' is-bad' : ''}` }, targetMsg),
+                        h('div', { className: 'dpf-target-msg' }, t('targetHint')),
+                      ),
+                    imageModelChoices.length > 0 &&
                       h(
                         'div',
                         { className: 'dpf-grid2', style: { marginTop: 8 } },
@@ -2076,6 +2585,17 @@ window.__ModuleLoader__.load({
                       running ? '…' : t('optimize'),
                     ),
                     running && h('button', { className: 'dpf-btn', type: 'button', onClick: stop }, t('stop')),
+                    h(
+                      'button',
+                      {
+                        className: 'dpf-btn',
+                        type: 'button',
+                        disabled: generating,
+                        title: t('renderHint'),
+                        onClick: () => void renderOne(),
+                      },
+                      generating ? t('generating') : image ? t('renderEdit') : t('preview'),
+                    ),
                   ),
                   !modelReady && !catalogLoading && h('div', { className: 'dpf-error dpf-warn', style: { marginTop: 10 } }, catalogError || t('needModel')),
                 ),
@@ -2083,12 +2603,27 @@ window.__ModuleLoader__.load({
                   'div',
                   { className: 'dpf-right' },
                   !result &&
+                    preview.length === 0 &&
+                    !previewError &&
+                    !generating &&
                     h(
                       'div',
                       { className: 'dpf-empty' },
                       emptyIcon,
                       h('div', { className: 'dpf-empty-title' }, t('resultEmpty')),
                       h('div', { className: 'dpf-empty-hint' }, t('resultEmptyHint')),
+                      h(
+                        'button',
+                        {
+                          className: 'dpf-btn dpf-btn-primary',
+                          type: 'button',
+                          disabled: generating || !(editedPrompt.trim() || idea.trim() || refs.length > 0),
+                          title: t('renderHint'),
+                          onClick: () => void renderOne(),
+                          style: { marginTop: 16 },
+                        },
+                        generating ? t('generating') : image ? t('renderEdit') : t('preview'),
+                      ),
                     ),
                   result &&
                     h(
@@ -2175,10 +2710,13 @@ window.__ModuleLoader__.load({
                       ),
                       previewError ? h('div', { className: 'dpf-error' }, previewError) : null,
                       generating && preview.length === 0 ? h('div', { className: 'dpf-preview-empty' }, t('generating')) : null,
+                      previewStale && preview.length > 0
+                        ? h('div', { className: 'dpf-stale' }, t('staleTag'))
+                        : null,
                       preview.length > 0 &&
                         h(
                           'div',
-                          { className: 'dpf-preview' },
+                          { className: previewStale ? 'dpf-preview is-stale' : 'dpf-preview' },
                           preview.map((shot, index) =>
                             h(
                               'div',

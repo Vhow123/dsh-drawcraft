@@ -334,6 +334,203 @@ async function writeConfig(value) {
   return next;
 }
 
+// ── bring-your-own image endpoint ────────────────────────────────────────────
+//
+// 面板可以完全不依赖 dsh-imagegen：这里允许用户自己填一个 OpenAI 兼容的
+// 生图端点（地址 + 密钥 + 模型名），由插件服务端转发，密钥不出本机、不写前端。
+
+const TARGETS_VERSION = 1;
+
+function targetsPath() {
+  return join(homedir(), '.dsh', 'prompt-forge-targets.json');
+}
+
+function slug(text) {
+  const flat = String(text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return flat.slice(0, 40) || `target-${Date.now().toString(36)}`;
+}
+
+function maskKey(key) {
+  const text = String(key || '').trim();
+  if (!text) return '';
+  if (text.length <= 8) return '****';
+  return `${text.slice(0, 4)}****${text.slice(-4)}`;
+}
+
+function normalizeTarget(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const baseUrl = String(raw.baseUrl || '')
+    .trim()
+    .replace(/\/+$/, '')
+    .slice(0, 400);
+  if (!/^https?:\/\//i.test(baseUrl)) return null;
+  const list = Array.isArray(raw.models) ? raw.models : String(raw.models || '').split(/[,，;；\s]+/);
+  const models = list
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .slice(0, 24);
+  if (models.length === 0) return null;
+  return {
+    id: String(raw.id || slug(raw.label || baseUrl)).slice(0, 40),
+    label: String(raw.label || baseUrl).slice(0, 60),
+    baseUrl,
+    apiKey: String(raw.apiKey || '').slice(0, 400),
+    models,
+  };
+}
+
+async function readTargets() {
+  try {
+    const raw = await readFile(targetsPath(), 'utf8');
+    const parsed = JSON.parse(raw);
+    const list = Array.isArray(parsed?.targets) ? parsed.targets : [];
+    return list.map(normalizeTarget).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function writeTargets(list) {
+  const next = {
+    version: TARGETS_VERSION,
+    targets: list.map(normalizeTarget).filter(Boolean).slice(0, 12),
+  };
+  const path = targetsPath();
+  await mkdir(join(homedir(), '.dsh'), { recursive: true });
+  const temp = `${path}.tmp`;
+  await writeFile(temp, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+  await rename(temp, path);
+  return next.targets;
+}
+
+/** 密钥只留在服务端，回给面板时打码。 */
+function publicTarget(target) {
+  return {
+    id: target.id,
+    label: target.label,
+    baseUrl: target.baseUrl,
+    models: target.models,
+    keyHint: maskKey(target.apiKey),
+    hasKey: target.apiKey.trim() !== '',
+  };
+}
+
+async function readJsonLoose(req, maxBytes = 32 * 1024 * 1024) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > maxBytes) throw Object.assign(new Error('参考图太大，单次最多 32 MB'), { code: 'body-too-large' });
+    chunks.push(chunk);
+  }
+  if (size === 0) return {};
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch {
+    throw Object.assign(new Error('请求内容不是合法 JSON'), { code: 'bad-json' });
+  }
+}
+
+function dataUrlToBlob(dataUrl) {
+  const text = String(dataUrl || '');
+  const match = /^data:([^;,]+)?(?:;base64)?,(.*)$/s.exec(text);
+  if (!match) return null;
+  const mime = match[1] || 'image/png';
+  const bytes = Buffer.from(match[2], 'base64');
+  if (bytes.length === 0) return null;
+  return new Blob([bytes], { type: mime });
+}
+
+async function imagesFromPayload(payload) {
+  const items = Array.isArray(payload?.data)
+    ? payload.data
+    : Array.isArray(payload?.images)
+      ? payload.images
+      : [];
+  const shots = [];
+  for (const item of items.slice(0, 8)) {
+    const inline = item?.b64_json || item?.b64;
+    if (typeof inline === 'string' && inline) {
+      shots.push({ b64: inline, mime: 'image/png' });
+      continue;
+    }
+    if (typeof item?.url === 'string' && item.url) {
+      try {
+        const remote = await fetch(item.url, { signal: AbortSignal.timeout(60000) });
+        if (!remote.ok) continue;
+        const bytes = Buffer.from(await remote.arrayBuffer());
+        shots.push({ b64: bytes.toString('base64'), mime: remote.headers.get('content-type') || 'image/png' });
+      } catch {
+        /* 单张取不回来不影响别的 */
+      }
+    }
+  }
+  return shots;
+}
+
+async function relayRender(target, body) {
+  const mode = body.mode === 'edit' ? 'edit' : 'text';
+  const prompt = String(body.prompt || '').slice(0, 8000);
+  if (!prompt) return { ok: false, code: 'bad-request', message: 'prompt is required' };
+  const model = target.models.includes(String(body.model || '')) ? String(body.model) : target.models[0];
+  const headers = {};
+  if (target.apiKey.trim()) headers.authorization = `Bearer ${target.apiKey.trim()}`;
+  let request;
+  if (mode === 'edit') {
+    const form = new FormData();
+    form.append('model', model);
+    form.append('prompt', prompt);
+    if (body.size && body.size !== 'auto') form.append('size', String(body.size));
+    if (body.n) form.append('n', String(body.n));
+    const first = dataUrlToBlob(body.image);
+    if (!first) return { ok: false, code: 'edit-image-missing', message: '图生图需要一张主图' };
+    form.append('image', first, 'reference.png');
+    const extras = Array.isArray(body.images) ? body.images.slice(0, 4) : [];
+    for (const [index, extra] of extras.entries()) {
+      const blob = dataUrlToBlob(extra);
+      if (blob) form.append('image[]', blob, `extra-${index}.png`);
+    }
+    request = { headers, body: form };
+  } else {
+    const payload = { model, prompt, n: Number(body.n) || 1 };
+    if (body.size && body.size !== 'auto') payload.size = String(body.size);
+    request = { headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(payload) };
+  }
+  const url = `${target.baseUrl}${mode === 'edit' ? '/images/edits' : '/images/generations'}`;
+  const started = Date.now();
+  let response;
+  try {
+    response = await fetch(url, { method: 'POST', ...request, signal: AbortSignal.timeout(600000) });
+  } catch (error) {
+    return { ok: false, code: 'network', message: `连不上 ${target.baseUrl}：${redact(textOf(error))}` };
+  }
+  const text = await response.text().catch(() => '');
+  let payload = null;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    payload = null;
+  }
+  if (!response.ok) {
+    const detail = payload?.error?.message || payload?.message || text.slice(0, 300) || `HTTP ${response.status}`;
+    return {
+      ok: false,
+      code: response.status === 400 || response.status === 403 ? 'upstream-rejected' : 'upstream-error',
+      message: redact(String(detail)),
+      status: response.status,
+      durationMs: Date.now() - started,
+    };
+  }
+  const shots = await imagesFromPayload(payload);
+  if (shots.length === 0) {
+    return { ok: false, code: 'empty', message: '上游没有返回图片', durationMs: Date.now() - started };
+  }
+  return { ok: true, images: shots, model, durationMs: Date.now() - started };
+}
+
 // ── agent tool ───────────────────────────────────────────────────────────────
 
 function formatToolResult(result) {
@@ -807,6 +1004,78 @@ export function apply(ctx) {
             controller.abort(new Error('优化已停止'));
           }
           writeJson(res, 200, { ok: true, stopped });
+        }),
+      ),
+      ctx.webServer.register(
+        route(`${API}/targets`, async (req, res) => {
+          const body = await readJson(req);
+          const action = String(body.action || 'list');
+          const list = await readTargets();
+          if (action === 'list') {
+            writeJson(res, 200, { ok: true, targets: list.map(publicTarget) });
+            return;
+          }
+          if (action === 'save') {
+            const draft = normalizeTarget(body.target);
+            if (!draft) {
+              writeJson(res, 200, { ok: false, code: 'bad-target', message: '地址要以 http(s):// 开头，模型名至少填一个' });
+              return;
+            }
+            const index = list.findIndex((item) => item.id === draft.id);
+            // 表单里密钥留空表示「不改」，不要把已存的密钥抹掉。
+            if (!draft.apiKey && index >= 0) draft.apiKey = list[index].apiKey;
+            if (index >= 0) list[index] = draft;
+            else list.push(draft);
+            const saved = await writeTargets(list);
+            writeJson(res, 200, { ok: true, targets: saved.map(publicTarget) });
+            return;
+          }
+          if (action === 'remove') {
+            const id = String(body.id || '');
+            const saved = await writeTargets(list.filter((item) => item.id !== id));
+            writeJson(res, 200, { ok: true, targets: saved.map(publicTarget) });
+            return;
+          }
+          if (action === 'test') {
+            const target = list.find((item) => item.id === String(body.id || ''));
+            if (!target) {
+              writeJson(res, 200, { ok: false, code: 'target-missing', message: '没有这个目标' });
+              return;
+            }
+            const headers = {};
+            if (target.apiKey.trim()) headers.authorization = `Bearer ${target.apiKey.trim()}`;
+            try {
+              const response = await fetch(`${target.baseUrl}/models`, { headers, signal: AbortSignal.timeout(30000) });
+              const payload = await response.json().catch(() => null);
+              const ids = (Array.isArray(payload?.data) ? payload.data : [])
+                .map((item) => String(item?.id || '').trim())
+                .filter(Boolean)
+                .slice(0, 40);
+              writeJson(res, 200, {
+                ok: response.ok,
+                status: response.status,
+                models: ids,
+                message: response.ok ? `连通，返回 ${ids.length} 个模型` : `HTTP ${response.status}`,
+              });
+            } catch (error) {
+              writeJson(res, 200, { ok: false, message: `连不上：${redact(textOf(error))}` });
+            }
+            return;
+          }
+          writeJson(res, 200, { ok: false, code: 'bad-action', message: `未知操作 ${action}` });
+        }),
+      ),
+      ctx.webServer.register(
+        route(`${API}/render`, async (req, res) => {
+          const body = await readJsonLoose(req);
+          const list = await readTargets();
+          const target = list.find((item) => item.id === String(body.targetId || ''));
+          if (!target) {
+            writeJson(res, 200, { ok: false, code: 'target-missing', message: '这个生图目标不在了，去「出图模型」里重新选一个' });
+            return;
+          }
+          const result = await relayRender(target, body);
+          writeJson(res, 200, result);
         }),
       ),
       ctx.webServer.register(
