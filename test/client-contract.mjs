@@ -195,7 +195,7 @@ check('主图槽空时把附加参考提成主图', clientSource.includes("image
 check('裸提示词补写实约束', clientSource.includes('PHOTO_NOTE') && clientSource.includes('bare ? PHOTO_NOTE'), 'photo-note');
 check('线稿开关默认开', clientSource.includes('const [neutralize, setNeutralize] = useState(true)'), 'neutralize-state');
 check('被审核拒绝时降级重试一次', clientSource.includes("failure?.code === 'upstream-rejected'"), 'retry');
-check('线稿附带说明前缀', clientSource.includes('CONTOUR_NOTE') && clientSource.includes('深度等值线图'), 'contour-note');
+check('线稿附带说明前缀', clientSource.includes('SKETCH_NOTE') && clientSource.includes('姿态线稿') && clientSource.includes('contourDataUrl(primary)'), 'contour-note');
 check('等高线算法可独立调用', clientSource.includes('function buildContourMask('), 'contour-mask');
 
 // 不必先优化就能出图
@@ -213,7 +213,7 @@ check('自定义端点走插件转发', clientSource.includes("activeTarget ? `$
 // 无限画布
 check('画布视图可切换', clientSource.includes("const [page, setPage] = useState('prompt')") && /canvasView\s*\?\s*canvasBody/.test(clientSource), 'canvas-view');
 check('画布状态单独落盘', clientSource.includes('CANVAS_KEY') && clientSource.includes('function writeCanvas('), 'canvas-store');
-check('拖动不逐帧写盘', clientSource.includes('canvasTouched') && clientSource.includes('}, [canvas]);'), 'canvas-debounce');
+check('拖动不逐帧写盘', clientSource.includes('canvasTouched') && /writeCanvasWorkspace\(canvasWorkspaceState\.current\)[\s\S]*?\}, \[canvasWorkspace\]\);/.test(clientSource), 'canvas-debounce');
 check('滚轮是非 passive 监听', clientSource.includes("addEventListener('wheel', onWheel, { passive: false })"), 'canvas-wheel');
 check('节点可拖动与缩放', clientSource.includes('canvasStartDrag') && clientSource.includes(".dpf-canvas-resize"), 'canvas-drag');
 check('空白处拖动平移', clientSource.includes('canvasPanStart') && clientSource.includes('canvasPan.current'), 'canvas-pan');
@@ -271,7 +271,45 @@ check('输入框里按删除键不删节点', clientSource.includes("if (tag ===
 check('没有图时不拿改图指令硬出图', clientSource.includes('canvasNeedSubject') && clientSource.includes('if (!primary && instruction)'), 'canvas-instruction-guard');
 
 // 画布里的参考库：面板内直接搜、按种类筛、点一张就落到画布
-check('画布有新建画布按钮与独立清空流程', clientSource.includes("const newCanvas = useCallback") && clientSource.includes("t('newCanvas')") && clientSource.includes("className: 'dpf-btn dpf-btn-small dpf-btn-primary dpf-canvas-new'") && clientSource.includes('onClick: newCanvas'), 'canvas-new');
+check(
+  '画布有新建画布按钮与独立清空流程',
+  clientSource.includes("const newCanvas = useCallback") &&
+    clientSource.includes("t('newCanvas')") &&
+    clientSource.includes("className: 'dpf-btn dpf-btn-small dpf-btn-primary dpf-canvas-new'") &&
+    clientSource.includes('onClick: newCanvas') &&
+    clientSource.includes('canvasWorkspace.items') &&
+    clientSource.includes('const switchCanvas = useCallback') &&
+    clientSource.includes('const renameCanvas = useCallback') &&
+    clientSource.includes('const deleteCanvas = useCallback') &&
+    clientSource.includes('onClick: clearCanvas'),
+  'canvas-new',
+);
+check(
+  '多画布工作区持久化并迁移旧键',
+  clientSource.includes("const CANVAS_WORKSPACE_KEY = 'dsh-drawcraft:canvases:v1'") &&
+    clientSource.includes('function normalizeCanvasWorkspace') &&
+    clientSource.includes('function readCanvasWorkspace') &&
+    clientSource.includes('function writeCanvasWorkspace') &&
+    clientSource.includes('const [canvasWorkspace, setCanvasWorkspace]') &&
+    clientSource.includes('writeCanvasWorkspace(canvasWorkspaceState.current)') &&
+    clientSource.includes('for (const key of [CANVAS_KEY, LEGACY_CANVAS_KEY])'),
+  'canvas-workspace-storage',
+);
+check(
+  '多画布切换与异步操作互相隔离',
+  clientSource.includes('const flushCanvasWorkspace = useCallback') &&
+    clientSource.includes('const canvasRequestSeq = useRef(0)') &&
+    clientSource.includes('requestSeq !== canvasRequestSeq.current || requestCanvasId !== activeCanvasIdRef.current') &&
+    clientSource.includes('const requestCanvasId = activeCanvasIdRef.current'),
+  'canvas-workspace-race-guards',
+);
+check(
+  '配额降级保留所有画布布局',
+  clientSource.includes('const layoutItems = workspace.items.map') &&
+    clientSource.includes('不能为了写入当前画布而静默删除其他画布') &&
+    clientSource.includes("return 'full';"),
+  'canvas-workspace-quota',
+);
 check('画布有自己的一套参考库 state', clientSource.includes('const [canvasGalOpen, setCanvasGalOpen]') && clientSource.includes('const [canvasGalWorks, setCanvasGalWorks]'), 'canvas-gallery-state');
 check('画布有参考库面板', clientSource.includes("className: 'dpf-canvas-gal'") && clientSource.includes('dpf-canvas-gal-grid'), 'canvas-gallery-panel');
 check('参考库检索在工坊与画布之间共用', clientSource.includes('const fetchGallery = useCallback') && clientSource.includes('const searchCanvasGallery = useCallback'), 'canvas-gallery-shared-fetch');
@@ -350,6 +388,7 @@ check(
 );
 
 check('插件整体采用白色主题', clientSource.includes('.dpf-panel{--dsw-alias-bg-primary:#fff') && clientSource.includes('.dpf-canvas{background-color:#f8fafc') && clientSource.includes('color-scheme:light'), 'light-theme');
+check('多画布列表控件可操作', clientSource.includes('.dpf-canvas-workspace') && clientSource.includes('dpf-canvas-workspace-select') && clientSource.includes("t('canvasRename')") && clientSource.includes("t('canvasDelete')"), 'canvas-workspace-ui');
 check(
   '左栏固定宽度、内容区独立滚动',
   clientSource.includes('.dpf-rail{width:214px;flex:none') &&

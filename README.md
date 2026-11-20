@@ -147,7 +147,7 @@ dsh plugin --profile desktop add github:Vhow123/dsh-drawcraft
 
 面板右上角点「无限画布」，正文换成整块画布，随时点「回到绘语」切回去。画布和绘语共用同一套出图通道，选中的「出图模型来自 / 出图模型」两边都生效。
 
-- **新建画布**：工具条有独立的「新建画布」按钮，确认后清空当前节点、连线和视口，从一张空白画布重新开始；左栏的「+ 新建」仍按当前页面统一清场。
+- **画布工作区**：工具条有「画布列表」下拉，可在多张画布间切换；「新建画布」会保留当前画布并打开一张新的空白画布，旧画布的节点、连线和视口都可切回；可直接重命名或删除当前画布（至少保留一张）。「清空画布」仍是单独操作，只清当前画布。
 - **平移缩放**：拖空白处平移，滚轮以指针为中心缩放（20%–250%），工具条上有 `−` 滑杆 `＋`、`适配`（把全部节点缩放进窗口）、以及百分比按钮（点一下回到 100%）。双击空白处复位到 100% 并回原点。
 - **小地图**：右下角一块，灰块是节点、蓝框是当前视口。点小地图任意位置，视口就挪过去。画布空的时候不占地方。
 - **节点**：`＋ 加图`（也可直接把图拖进画布、或 `Ctrl+V` 粘贴——剪贴板里是文件就落文件，只有图链就自己抓回来）、`＋ 提示词`。拖节点头部移动，拖右下角改尺寸，头部 `×` 删除，`↓` 下载，`⇢` 把这张图/这段文字送回绘语继续优化。
@@ -183,7 +183,7 @@ dsh plugin --profile desktop add github:Vhow123/dsh-drawcraft
 
 从哪儿出图都落到生图页，出完自动跳过去看一眼；提示词页只留「去生图 →」的跳转按钮，不在那儿堆结果。
 
-「+ 新建」按当前页清场：提示词页清掉想法与结果，生图页清掉主图、参考与出图结果，画布页清空画布（有节点时会先问一句）。历史记录不动。
+「+ 新建」按当前页创建新内容：提示词页清掉想法与结果，生图页清掉主图、参考与出图结果，画布页新建一张空白画布并保留原画布。需要清空当前画布时用工具条的「清空画布」；历史记录不动。
 
 侧边栏里，绘语的入口与「新会话」按钮**左右并排**，贴在它右边——原来 dsh-imagegen 那对「会话 / 生图」页签的位置。宿主只提供 `sidebar.panellist` 槽，而槽渲染在按钮下面，插不进按钮右侧，所以这段靠 DOM 注入补：
 
@@ -227,7 +227,7 @@ C:\Users\Administrator\.dsh\profiles\desktop\node_modules\@dickpy\dsh-imagegen\l
 ## 配置
 
 - `~/.dsh/drawcraft.json`：provider / model / 方言 / 风格 / 语言 / 画幅 / 候选数，`/optimize` 带 `remember: true` 时写入。
-- 浏览器 localStorage `dsh-drawcraft:v1`（旧键 `dsh-image-prompt-forge:v1` 会在第一次打开时自动搬过来）：面板选择、来源/渠道/模型、参考图与最近 24 条历史；画布单独存于 `dsh-drawcraft:canvas:v1`。
+- 浏览器 localStorage `dsh-drawcraft:v1`（旧键 `dsh-image-prompt-forge:v1` 会在第一次打开时自动搬过来）：面板选择、来源/渠道/模型、参考图与最近 24 条历史；多画布工作区存于 `dsh-drawcraft:canvases:v1`，首次打开会把旧的 `dsh-drawcraft:canvas:v1` 或 `dsh-image-prompt-forge:canvas:v1` 迁移为默认画布。
 
 ## 接口
 
@@ -248,12 +248,12 @@ C:\Users\Administrator\.dsh\profiles\desktop\node_modules\@dickpy\dsh-imagegen\l
 ## 开发
 
 ```bash
-node --test test/*.test.js      # 引擎、画布存储与撤销栈、路由与工具契约单测（63 项）
+node --test test/*.test.js      # 引擎、画布存储与撤销栈、路由与工具契约单测（70 项）
 node test/bare-import.mjs       # 裸加载验证：不重定向任何宿主包直接 import
 node test/client-contract.mjs   # 浏览器半的槽位、词典与渲染钩子契约
 node --check index.js client.js engine.js
 node test/live-sidebar.mjs "http://127.0.0.1:<port>/?token=<TOKEN>"   # 真机：验证侧边栏入口（必须传带 token URL）
-node test/live-canvas.mjs "http://127.0.0.1:<port>/?token=<TOKEN>"    # 真机：验证新建画布与白色主题（必须传带 token URL）
+node test/live-canvas.mjs "http://127.0.0.1:<port>/?token=<TOKEN>"    # 真机：验证多画布创建、切换、命名、删除、刷新恢复与白色主题
 ```
 
 前三样都是读源码，读不出「点了没反应」。v1.10.4 就是这么漏过去的：`inject` 少写一个 `layout`，cordis 的 Proxy 一取值就抛错，点击处理器当场炸，而所有静态断言全绿。所以加了第四个：

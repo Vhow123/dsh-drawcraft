@@ -46,6 +46,14 @@ const check = (name, ok, detail = '') => {
 try {
   await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
   await new Promise((resolve) => setTimeout(resolve, 6000));
+  // 每次真机回归从默认空工作区开始，避免上一次运行留下的画布干扰断言。
+  await page.evaluate(() => {
+    localStorage.removeItem('dsh-drawcraft:canvases:v1');
+    localStorage.removeItem('dsh-drawcraft:canvas:v1');
+    localStorage.removeItem('dsh-image-prompt-forge:canvas:v1');
+  });
+  await page.reload({ waitUntil: 'networkidle2', timeout: 60000 });
+  await new Promise((resolve) => setTimeout(resolve, 6000));
   await page.evaluate(() => {
     const mask = document.querySelector('.dshp-auth-mask');
     if (!mask) return;
@@ -94,14 +102,82 @@ try {
     });
     await new Promise((resolve) => setTimeout(resolve, 400));
     const before = await page.$$eval('.dpf-canvas-node', (nodes) => nodes.length);
-    check('画布能新增节点用于重置验证', before > 0, String(before));
-    let dialogSeen = false;
-    page.once('dialog', async (dialog) => { dialogSeen = true; await dialog.accept(); });
+    const first = await page.evaluate(() => {
+      const select = document.querySelector('.dpf-canvas-workspace-select');
+      return { id: select?.value || '', name: select?.selectedOptions?.[0]?.textContent || '', count: select?.options?.length || 0 };
+    });
+    check('画布能新增节点并保留旧工作区', before > 0 && Boolean(first.id), JSON.stringify({ before, first }));
     await page.click('.dpf-canvas-new');
     await new Promise((resolve) => setTimeout(resolve, 500));
-    const after = await page.$$eval('.dpf-canvas-node', (nodes) => nodes.length);
-    check('新建画布清空节点', after === 0, String(after));
-    check('非空画布新建会确认', dialogSeen);
+    const second = await page.evaluate(() => {
+      const select = document.querySelector('.dpf-canvas-workspace-select');
+      return { id: select?.value || '', name: select?.selectedOptions?.[0]?.textContent || '', count: select?.options?.length || 0, nodes: document.querySelectorAll('.dpf-canvas-node').length };
+    });
+    check('新建画布增加列表项并切换', second.count === first.count + 1 && second.id !== first.id, JSON.stringify({ first, second }));
+    check('新画布从空白开始', second.nodes === 0, String(second.nodes));
+    await page.select('.dpf-canvas-workspace-select', first.id);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const restored = await page.$$eval('.dpf-canvas-node', (nodes) => nodes.length);
+    check('切回旧画布后节点仍在', restored === before, String(restored));
+
+    let renameDialog = false;
+    page.once('dialog', async (dialog) => { renameDialog = true; await dialog.accept('保留内容的画布'); });
+    await page.evaluate(() => {
+      const button = [...document.querySelectorAll('.dpf-canvas-workspace button')].find((item) => /重命名|rename/i.test(item.textContent || ''));
+      button?.click();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const renamed = await page.$eval('.dpf-canvas-workspace-select option:checked', (option) => option.textContent || '');
+    check('当前画布支持命名', renameDialog && renamed === '保留内容的画布', renamed);
+
+    await page.click('.dpf-canvas-new');
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    // 先删非当前画布，再删当前画布，覆盖两种删除路径并确认至少保留一张。
+    await page.select('.dpf-canvas-workspace-select', second.id);
+    await page.waitForFunction((id) => document.querySelector('.dpf-canvas-workspace-select')?.value === id, { timeout: 5000 }, second.id);
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    let nonActiveDeleteDialog = false;
+    page.once('dialog', async (dialog) => { nonActiveDeleteDialog = true; await dialog.accept(); });
+    await page.click('.dpf-canvas-delete');
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    const afterNonActiveDelete = await page.evaluate(() => ({
+      count: document.querySelector('.dpf-canvas-workspace-select')?.options?.length || 0,
+      id: document.querySelector('.dpf-canvas-workspace-select')?.value || '',
+    }));
+    check('删除选中画布后切换到保留画布', nonActiveDeleteDialog && afterNonActiveDelete.count === 2 && afterNonActiveDelete.id !== second.id, JSON.stringify(afterNonActiveDelete));
+    let activeDeleteDialog = false;
+    page.once('dialog', async (dialog) => { activeDeleteDialog = true; await dialog.accept(); });
+    await page.click('.dpf-canvas-delete');
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    const afterDelete = await page.evaluate(() => ({
+      count: document.querySelector('.dpf-canvas-workspace-select')?.options?.length || 0,
+      name: document.querySelector('.dpf-canvas-workspace-select option:checked')?.textContent || '',
+      nodes: document.querySelectorAll('.dpf-canvas-node').length,
+    }));
+    check('当前画布支持删除且至少保留一张', activeDeleteDialog && afterDelete.count === 1 && afterDelete.name === '保留内容的画布' && afterDelete.nodes === before, JSON.stringify(afterDelete));
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+    await new Promise((resolve) => setTimeout(resolve, 6000));
+    await page.evaluate(() => {
+      const mask = document.querySelector('.dshp-auth-mask');
+      if (!mask) return;
+      document.querySelectorAll('input[type="checkbox"]').forEach((box) => { if (!box.checked) box.click(); });
+      [...document.querySelectorAll('button')].find((button) => /我已知晓并继续/.test(button.textContent || ''))?.click();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    await page.evaluate(() => document.querySelector('[data-drawcraft-tab]')?.click());
+    await page.waitForSelector('.dpf-shell', { timeout: 15000 });
+    await page.evaluate(() => {
+      const tab = [...document.querySelectorAll('.dpf-rail-tab')].find((node) => /画布|canvas/i.test(node.textContent || ''));
+      tab?.click();
+    });
+    await page.waitForSelector('.dpf-canvas', { timeout: 15000 });
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    const persisted = await page.evaluate(() => ({
+      count: document.querySelector('.dpf-canvas-workspace-select')?.options?.length || 0,
+      name: document.querySelector('.dpf-canvas-workspace-select option:checked')?.textContent || '',
+      nodes: document.querySelectorAll('.dpf-canvas-node').length,
+    }));
+    check('刷新后画布名称与内容仍保留', persisted.count === 1 && persisted.name === '保留内容的画布' && persisted.nodes === before, JSON.stringify(persisted));
   } else {
     check('画布存在新增文字按钮', false, JSON.stringify(initial.toolButtons));
   }

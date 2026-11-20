@@ -40,6 +40,9 @@ window.__ModuleLoader__.load({
     const HISTORY_LIMIT = 24;
     // 无限画布自己一份存储：图多的时候 JSON 会很大，不能和普通设置挤在同一个键里。
     const CANVAS_KEY = 'dsh-drawcraft:canvas:v1';
+    const CANVAS_WORKSPACE_KEY = 'dsh-drawcraft:canvases:v1';
+    const CANVAS_NAME_LIMIT = 80;
+    const DEFAULT_CANVAS_NAME = '新画布';
     const LEGACY_CANVAS_KEY = 'dsh-image-prompt-forge:canvas:v1';
     // 进画布的图长边压到这个数，一张约 60–120 KB；1280 会让 localStorage 几张就爆。
     const CANVAS_MAX_EDGE = 768;
@@ -49,7 +52,7 @@ window.__ModuleLoader__.load({
     // 撤销栈深度。每步存的是整份画布快照，40 步够用又不会把内存撑爆。
     const CANVAS_HISTORY = 40;
     // 页脚显示，用来一眼判断浏览器加载的是哪一版 bundle（缓存排查用）。
-    const BUILD = '1.10.9';
+    const BUILD = '1.11.0';
 
     // Labels are duplicated from engine.js on purpose: client.js is loaded as a
     // separate bundle and cannot import ESM. The host catalog (fetched on open)
@@ -261,9 +264,15 @@ window.__ModuleLoader__.load({
       canvasFollowImage: '按这张图的样子生成，保持人物与构图',
       canvasFit: '适配',
       canvasClear: '清空画布',
-      canvasClearAsk: '清空整个画布？这一步不能撤销。',
+      canvasClearAsk: '清空整个画布？清空后仍可用撤销恢复。',
       newCanvas: '新建画布',
-      newCanvasHint: '清空当前画布并重新开始',
+      newCanvasHint: '保留旧画布并创建一张新的空白画布',
+      canvasWorkspace: '画布列表',
+      canvasRename: '重命名',
+      canvasRenameHint: '修改当前画布名称',
+      canvasDelete: '删除画布',
+      canvasDeleteAsk: '删除这张画布？画布内容会一起删除。',
+      canvasNamePlaceholder: '画布名称',
       canvasToWorkshop: '送去绘语',
       canvasPick: '加到画布',
       canvasGallery: '参考库',
@@ -482,9 +491,15 @@ window.__ModuleLoader__.load({
       canvasFollowImage: 'Render in the style of this image, keeping the subject and framing',
       canvasFit: 'Fit',
       canvasClear: 'Clear canvas',
-      canvasClearAsk: 'Clear the whole canvas? This cannot be undone.',
+      canvasClearAsk: 'Clear the whole canvas? You can still undo this change.',
       newCanvas: 'New canvas',
-      newCanvasHint: 'Clear this canvas and start over',
+      newCanvasHint: 'Keep the old canvas and create a new blank canvas',
+      canvasWorkspace: 'Canvas list',
+      canvasRename: 'Rename',
+      canvasRenameHint: 'Rename the current canvas',
+      canvasDelete: 'Delete canvas',
+      canvasDeleteAsk: 'Delete this canvas? Its contents will be removed.',
+      canvasNamePlaceholder: 'Canvas name',
       canvasToWorkshop: 'Send to Drawcraft',
       canvasPick: 'Add to canvas',
       canvasGallery: 'Reference library',
@@ -774,6 +789,8 @@ window.__ModuleLoader__.load({
 .dpf-canvas-port:hover{background:#ffd166;border-color:#fff;transform:scale(1.3)}
 .dpf-canvas-node[data-linkfrom="1"]{box-shadow:0 0 0 2px #ffd166,0 12px 40px #0006}
 .dpf-canvas-tools{position:absolute;top:10px;left:10px;right:10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;z-index:3}
+.dpf-canvas-workspace{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+.dpf-canvas-workspace-select{min-width:150px;max-width:240px}
 .dpf-canvas-tools .dpf-btn{background:#000000a6;border-color:#ffffff2b;color:#eee}
 .dpf-canvas-tools .dpf-btn:hover{background:#000000cc}
 .dpf-canvas-tools .dpf-btn-primary{flex:0 0 auto;background:var(--dsw-alias-interactive-primary,#ededf0);color:var(--dsw-alias-text-on-primary,#141416);border-color:transparent}
@@ -958,11 +975,6 @@ window.__ModuleLoader__.load({
          * 上色后中性姿势能过、性感系姿势仍被 NSFW 拦。
          * 改成白底线条的深度等值线图（等高线）后，画面里只剩线，实测能正常出图。
          */
-        const CONTOUR_NOTE = {
-          en: 'The reference is a depth-contour diagram: take only its silhouette and joint positions as the pose blueprint, and ignore the contour lines themselves — those are measurement lines, not a pattern printed on clothing.\n\n',
-          zh: '参考图是一张深度等值线图：只把它的轮廓与关节位置当作姿态蓝图，图上的线条本身要忽略——那些是测量线，不是衣服上的花纹。\n\n',
-        };
-
         /**
          * 没有任何像样提示词时的兜底。
          * 只喂一句「坐姿・抱腿打开」进去，图像模型会自己挑风格——它挑的是插画。
@@ -1403,6 +1415,109 @@ window.__ModuleLoader__.load({
           };
         }
 
+        function normalizeCanvasName(value, fallback = DEFAULT_CANVAS_NAME) {
+          const name = typeof value === 'string' ? value.trim().slice(0, CANVAS_NAME_LIMIT) : '';
+          return name || fallback;
+        }
+
+        function normalizeCanvasWorkspace(value, now = Date.now()) {
+          const source = value && typeof value === 'object' ? value : {};
+          const rawItems = Array.isArray(source.items) ? source.items : [];
+          const seen = new Set();
+          const items = rawItems.map((item, index) => {
+            if (!item || !canvasValidId(item.id) || seen.has(item.id)) return null;
+            seen.add(item.id);
+            const id = item.id;
+            const createdAt = Number.isFinite(Number(item.createdAt)) ? Number(item.createdAt) : now + index;
+            const updatedAt = Number.isFinite(Number(item.updatedAt)) ? Number(item.updatedAt) : createdAt;
+            return {
+              id,
+              name: normalizeCanvasName(item.name, `${DEFAULT_CANVAS_NAME} ${index + 1}`),
+              createdAt,
+              updatedAt,
+              state: normalizeCanvasState(item.state, CANVAS_LIMIT),
+            };
+          }).filter(Boolean);
+          if (items.length === 0) {
+            items.push({ id: 'cw_default', name: DEFAULT_CANVAS_NAME, createdAt: now, updatedAt: now, state: { ...EMPTY_CANVAS } });
+          }
+          const requested = canvasValidId(source.activeId) ? source.activeId : '';
+          const activeId = items.some((item) => item.id === requested) ? requested : items[0].id;
+          return { version: 1, activeId, items };
+        }
+
+        function readCanvasWorkspace() {
+          // 新键损坏时继续尝试旧单画布键，避免升级过程中把已有内容遮掉。
+          let workspaceValue = null;
+          try {
+            const raw = localStorage.getItem(CANVAS_WORKSPACE_KEY);
+            if (raw) workspaceValue = JSON.parse(raw);
+          } catch {
+            workspaceValue = null;
+          }
+          if (workspaceValue && typeof workspaceValue === 'object' && Array.isArray(workspaceValue.items)) {
+            return normalizeCanvasWorkspace(workspaceValue);
+          }
+          const legacy = readCanvas();
+          const now = Date.now();
+          const workspace = normalizeCanvasWorkspace({
+            version: 1,
+            activeId: 'cw_default',
+            items: [{ id: 'cw_default', name: DEFAULT_CANVAS_NAME, createdAt: now, updatedAt: now, state: legacy }],
+          }, now);
+          writeCanvasWorkspace(workspace);
+          return workspace;
+        }
+
+        function writeCanvasWorkspace(value) {
+          const workspace = normalizeCanvasWorkspace(value);
+          const payload = { version: 1, activeId: workspace.activeId, items: workspace.items };
+          try {
+            localStorage.setItem(CANVAS_WORKSPACE_KEY, JSON.stringify(payload));
+            return '';
+          } catch {
+            try {
+              const slimItems = workspace.items.map((item) => ({
+                ...item,
+                state: {
+                  ...item.state,
+                  nodes: item.state.nodes.map((node) => ({ ...node, src: '', lost: Boolean(node.src), ...(node.meta ? { meta: { ...node.meta, referenceSources: [] } } : {}) })),
+                },
+              }));
+              localStorage.setItem(CANVAS_WORKSPACE_KEY, JSON.stringify({ ...payload, items: slimItems }));
+              return 'quota';
+            } catch {
+              // 最后仍保留所有画布的名称、ID、节点布局和视口；不能为了写入当前画布而静默删除其他画布。
+              const layoutItems = workspace.items.map((item) => ({
+                ...item,
+                state: {
+                  nodes: item.state.nodes.map((node) => ({
+                    id: node.id,
+                    kind: node.kind,
+                    x: node.x,
+                    y: node.y,
+                    w: node.w,
+                    h: node.h,
+                    title: node.title,
+                    src: '',
+                    text: node.text,
+                    note: node.note,
+                    ...(node.lost || node.src ? { lost: Boolean(node.src) || Boolean(node.lost) } : {}),
+                  })),
+                  edges: item.state.edges,
+                  view: item.state.view,
+                },
+              }));
+              try {
+                localStorage.setItem(CANVAS_WORKSPACE_KEY, JSON.stringify({ ...payload, items: layoutItems }));
+                return 'quota';
+              } catch {
+                return 'full';
+              }
+            }
+          }
+        }
+
         function validateCanvasPayload(value, limit = 60) {
           if (!value || typeof value !== 'object' || !Array.isArray(value.nodes) || value.nodes.length > limit) return null;
           const ids = new Set();
@@ -1460,15 +1575,18 @@ window.__ModuleLoader__.load({
         }
 
         function readCanvas() {
-          try {
-            let raw = localStorage.getItem(CANVAS_KEY);
-            if (!raw) raw = localStorage.getItem(LEGACY_CANVAS_KEY);
-            const value = raw ? JSON.parse(raw) : null;
-            if (!value || typeof value !== 'object') return { ...EMPTY_CANVAS };
-            return normalizeCanvasState(value, CANVAS_LIMIT);
-          } catch {
-            return { ...EMPTY_CANVAS };
+          for (const key of [CANVAS_KEY, LEGACY_CANVAS_KEY]) {
+            try {
+              const raw = localStorage.getItem(key);
+              if (!raw) continue;
+              const value = JSON.parse(raw);
+              if (!value || typeof value !== 'object') continue;
+              return normalizeCanvasState(value, CANVAS_LIMIT);
+            } catch {
+              // 新键损坏时继续尝试更早版本的键，避免升级时遮掉旧画布。
+            }
           }
+          return { ...EMPTY_CANVAS };
         }
 
         function writeCanvas(state) {
@@ -1666,10 +1784,18 @@ window.__ModuleLoader__.load({
 
           // ── 无限画布 ────────────────────────────────────────────────
           // 和工坊共用一套出图通道，但排版、选择、血缘都是自己的。
-          const [canvas, setCanvas] = useState(readCanvas);
+          const [canvasWorkspace, setCanvasWorkspace] = useState(() => readCanvasWorkspace());
+          const [activeCanvasId, setActiveCanvasId] = useState(() => canvasWorkspace.activeId);
+          const initialCanvas = canvasWorkspace.items.find((item) => item.id === canvasWorkspace.activeId) || canvasWorkspace.items[0];
+          const [canvas, setCanvas] = useState(() => initialCanvas?.state || { ...EMPTY_CANVAS });
           const [canvasSel, setCanvasSel] = useState([]);
           const [canvasBusy, setCanvasBusy] = useState('');
+          const canvasRequestSeq = useRef(0);
           const [canvasMsg, setCanvasMsg] = useState({ text: '', bad: false });
+          const canvasWorkspaceState = useRef(canvasWorkspace);
+          const activeCanvasIdRef = useRef(activeCanvasId);
+          canvasWorkspaceState.current = canvasWorkspace;
+          activeCanvasIdRef.current = activeCanvasId;
           const canvasRef = useRef(null);
           const canvasPan = useRef(null);
           const canvasGrab = useRef(null);
@@ -3067,8 +3193,15 @@ window.__ModuleLoader__.load({
             }
           }, [canvasLink, canvas.nodes.length]);
 
-          const canvasStore = useCallback((next) => {
+          const canvasStore = useCallback((next, id = activeCanvasIdRef.current, stamp = Date.now()) => {
+            const current = canvasWorkspaceState.current;
+            const items = current.items.map((item) => item.id === id ? { ...item, state: next, updatedAt: stamp } : item);
+            const workspace = { ...current, activeId: id, items };
+            canvasWorkspaceState.current = workspace;
+            activeCanvasIdRef.current = id;
             canvasState.current = next;
+            setCanvasWorkspace(workspace);
+            setActiveCanvasId(id);
             setCanvas(next);
           }, []);
 
@@ -3088,49 +3221,65 @@ window.__ModuleLoader__.load({
               const next = typeof updater === 'function' ? updater(prev) : updater;
               if (!next || next === prev) return;
               if (!(options && options.silent)) canvasRemember(prev);
-              canvasState.current = next;
-              setCanvas(next);
+              canvasStore(next);
             },
-            [canvasRemember],
+            [canvasRemember, canvasStore],
           );
 
           const canvasUndo = useCallback(() => {
             const result = histUndo(canvasHist.current, canvasState.current);
             if (!result) return;
             canvasHist.current = result.hist;
-            canvasState.current = result.state;
-            setCanvas(result.state);
+            canvasStore(result.state);
             setCanvasSel([]);
             setCanvasDepth({ undo: result.hist.past.length, redo: result.hist.future.length });
-          }, []);
+          }, [canvasStore]);
 
           const canvasRedo = useCallback(() => {
             const result = histRedo(canvasHist.current, canvasState.current);
             if (!result) return;
             canvasHist.current = result.hist;
-            canvasState.current = result.state;
-            setCanvas(result.state);
+            canvasStore(result.state);
             setCanvasSel([]);
             setCanvasDepth({ undo: result.hist.past.length, redo: result.hist.future.length });
-          }, []);
+          }, [canvasStore]);
 
           const canvasNodeId = () => `cn_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
           // 落盘做 400ms 防抖：拖节点、缩放时不该每次都写 localStorage。
           const canvasTouched = useRef(false);
+          const canvasPersistTimer = useRef(null);
+          const canvasPersistSeq = useRef(0);
+          const flushCanvasWorkspace = useCallback(() => {
+            if (canvasPersistTimer.current) {
+              clearTimeout(canvasPersistTimer.current);
+              canvasPersistTimer.current = null;
+            }
+            canvasPersistSeq.current += 1;
+            return writeCanvasWorkspace(canvasWorkspaceState.current);
+          }, []);
           useEffect(() => {
             if (!canvasTouched.current) {
               canvasTouched.current = true;
               return undefined;
             }
-            const timer = setTimeout(() => {
-              const warn = writeCanvas(canvasState.current);
+            const seq = ++canvasPersistSeq.current;
+            if (canvasPersistTimer.current) clearTimeout(canvasPersistTimer.current);
+            canvasPersistTimer.current = setTimeout(() => {
+              canvasPersistTimer.current = null;
+              if (seq !== canvasPersistSeq.current) return;
+              const warn = writeCanvasWorkspace(canvasWorkspaceState.current);
               if (warn === 'quota') setCanvasMsg({ text: t('canvasQuota'), bad: true });
               else if (warn === 'full') setCanvasMsg({ text: t('canvasFull'), bad: true });
             }, 400);
-            return () => clearTimeout(timer);
+            return () => {
+              if (canvasPersistTimer.current) {
+                clearTimeout(canvasPersistTimer.current);
+                canvasPersistTimer.current = null;
+              }
+            };
             // t 每次渲染都是新的 bind 结果，放进依赖会让这个定时器被反复重置。
-          }, [canvas]);
+          }, [canvasWorkspace]);
 
           // React 的 onWheel 是 passive 监听，preventDefault 会被忽略，只能自己挂。
           useEffect(() => {
@@ -3194,8 +3343,10 @@ window.__ModuleLoader__.load({
           const refToCanvas = useCallback(
             async (work) => {
               if (!work || !work.imageUrl) return;
+              const requestCanvasId = activeCanvasIdRef.current;
               setCanvasMsg({ text: t('canvasWorking'), bad: false });
               const data = await remoteImageToDataUrl(work.imageUrl, CANVAS_MAX_EDGE);
+              if (requestCanvasId !== activeCanvasIdRef.current) return;
               if (!data) {
                 setCanvasMsg({ text: t('canvasBadImage'), bad: true });
                 return;
@@ -3227,6 +3378,7 @@ window.__ModuleLoader__.load({
           // 参考库条目 → 选中的那个节点。图片节点换图，文字节点把名字和标签追加成一行提示词。
           const applyRefToNode = useCallback(
             async (work) => {
+              const requestCanvasId = activeCanvasIdRef.current;
               const state = canvasState.current;
               const sel = state.nodes.filter((node) => canvasSel.includes(node.id));
               const target = sel.length === 1 ? sel[0] : null;
@@ -3245,6 +3397,7 @@ window.__ModuleLoader__.load({
               }
               setCanvasMsg({ text: t('canvasWorking'), bad: false });
               const data = await remoteImageToDataUrl(work.imageUrl, CANVAS_MAX_EDGE);
+              if (requestCanvasId !== activeCanvasIdRef.current) return;
               if (!data) {
                 setCanvasMsg({ text: t('canvasBadImage'), bad: true });
                 return;
@@ -3397,6 +3550,7 @@ window.__ModuleLoader__.load({
 
           const canvasImport = useCallback(
             async (file) => {
+              const requestCanvasId = activeCanvasIdRef.current;
               if (!file || Number(file.size) > CANVAS_IMPORT_MAX_BYTES) {
                 setCanvasMsg({ text: t('canvasImportBad'), bad: true });
                 return;
@@ -3405,9 +3559,10 @@ window.__ModuleLoader__.load({
               try {
                 parsed = JSON.parse(await file.text());
               } catch {
-                setCanvasMsg({ text: t('canvasImportBad'), bad: true });
+                if (requestCanvasId === activeCanvasIdRef.current) setCanvasMsg({ text: t('canvasImportBad'), bad: true });
                 return;
               }
+              if (requestCanvasId !== activeCanvasIdRef.current) return;
               const next = validateCanvasPayload(parsed, CANVAS_LIMIT);
               if (!next || !window.confirm(t('canvasImportAsk'))) {
                 setCanvasMsg({ text: t('canvasImportBad'), bad: true });
@@ -3423,9 +3578,11 @@ window.__ModuleLoader__.load({
           const canvasLoadFile = useCallback(
             async (file, extra = {}) => {
               if (!file || !String(file.type || '').startsWith('image/')) return;
+              const requestCanvasId = activeCanvasIdRef.current;
               // readImageFile 直接返回 data URL 字符串（不是 {data,name} 那种对象），别当成对象取 .data。
               try {
                 const data = await readImageFile(file, CANVAS_MAX_EDGE);
+                if (requestCanvasId !== activeCanvasIdRef.current) return;
                 if (!data) {
                   setCanvasMsg({ text: t('canvasBadImage'), bad: true });
                   return;
@@ -3433,7 +3590,7 @@ window.__ModuleLoader__.load({
                 const name = file.name && file.name !== 'blob' ? file.name : t('canvasImage');
                 addCanvasNode('image', { src: data, title: name, note: extra.note || '' });
               } catch (failure) {
-                setCanvasMsg({ text: failure?.message || t('canvasBadImage'), bad: true });
+                if (requestCanvasId === activeCanvasIdRef.current) setCanvasMsg({ text: failure?.message || t('canvasBadImage'), bad: true });
               }
             },
             [addCanvasNode, t],
@@ -3442,7 +3599,9 @@ window.__ModuleLoader__.load({
           // 从网页/微信/Word 复制来的往往只有图链，没有文件本体，得自己抓回来。
           const canvasPasteLink = useCallback(
             async (url) => {
+              const requestCanvasId = activeCanvasIdRef.current;
               const data = await remoteImageToDataUrl(url, CANVAS_MAX_EDGE);
+              if (requestCanvasId !== activeCanvasIdRef.current) return;
               if (!data) {
                 setCanvasMsg({ text: t('canvasBadImage'), bad: true });
                 return;
@@ -3469,6 +3628,8 @@ window.__ModuleLoader__.load({
           // 结果作为新节点挂在右上方，并从每个输入节点连一条血缘线过去。
           const canvasGenerate = useCallback(async (idList) => {
             if (canvasBusy) return;
+            const requestCanvasId = activeCanvasIdRef.current;
+            const requestSeq = ++canvasRequestSeq.current;
             const state = canvasState.current;
             // 不传 id 就用当前选中；从节点上的「⚡」进来时直接指定这个节点和它的上游。
             const ids = Array.isArray(idList) && idList.length > 0 ? idList : canvasSel;
@@ -3523,7 +3684,9 @@ window.__ModuleLoader__.load({
             // 所以先转成姿态卡再发，并把「别照搬卡片风格」写进提示词。
             let poseCarded = false;
             if (primary && (await imageLooksFlat(primary))) {
+              if (requestSeq !== canvasRequestSeq.current || requestCanvasId !== activeCanvasIdRef.current) return;
               primary = await poseCardDataUrl(primary);
+              if (requestSeq !== canvasRequestSeq.current || requestCanvasId !== activeCanvasIdRef.current) return;
               poseCarded = true;
             }
             const orderText = primary
@@ -3545,6 +3708,7 @@ window.__ModuleLoader__.load({
             setCanvasMsg({ text: t('canvasWorking'), bad: false });
             try {
               const shots = await requestImage({ prompt, primary, extras });
+              if (requestSeq !== canvasRequestSeq.current || requestCanvasId !== activeCanvasIdRef.current) return;
               const shot = shots[0];
               const anchor = picked[0];
               const id = canvasNodeId();
@@ -3597,6 +3761,7 @@ window.__ModuleLoader__.load({
               setCanvasSel([id]);
               setCanvasMsg({ text: t('canvasDone'), bad: false });
             } catch (failure) {
+              if (requestSeq !== canvasRequestSeq.current || requestCanvasId !== activeCanvasIdRef.current) return;
               const message = failure?.message || String(failure);
               const rejected = failure?.code === 'upstream-rejected';
               setCanvasMsg({
@@ -3604,7 +3769,7 @@ window.__ModuleLoader__.load({
                 bad: true,
               });
             } finally {
-              setCanvasBusy('');
+              if (requestSeq === canvasRequestSeq.current && requestCanvasId === activeCanvasIdRef.current) setCanvasBusy('');
             }
           }, [canvasBusy, canvasSel, commitCanvas, effectiveImageModel, imageQuality, imageSize, language, requestImage, t]);
 
@@ -3649,6 +3814,8 @@ window.__ModuleLoader__.load({
             async (node) => {
               if (!node || !node.meta || canvasBusy) return;
               const meta = node.meta;
+              const requestCanvasId = activeCanvasIdRef.current;
+              const requestSeq = ++canvasRequestSeq.current;
               const primary = meta.withImage ? node.src || '' : '';
               const words = String(meta.prompt || '').trim();
               const state = canvasState.current;
@@ -3681,6 +3848,7 @@ window.__ModuleLoader__.load({
                   quality: meta.quality || '',
                   model: meta.model || '',
                 });
+                if (requestSeq !== canvasRequestSeq.current || requestCanvasId !== activeCanvasIdRef.current) return;
                 const shot = shots[0];
                 const id = canvasNodeId();
                 const fresh = {
@@ -3704,11 +3872,12 @@ window.__ModuleLoader__.load({
                 setCanvasSel([id]);
                 setCanvasMsg({ text: refsMissing ? t('canvasRefsMissing') : t('canvasDone'), bad: refsMissing });
               } catch (failure) {
+                if (requestSeq !== canvasRequestSeq.current || requestCanvasId !== activeCanvasIdRef.current) return;
                 const message = failure?.message || String(failure);
                 const rejected = failure?.code === 'upstream-rejected';
                 setCanvasMsg({ text: rejected ? `${message}\n\n${t('rejectedHint')}` : message, bad: true });
               } finally {
-                setCanvasBusy('');
+                if (requestSeq === canvasRequestSeq.current && requestCanvasId === activeCanvasIdRef.current) setCanvasBusy('');
               }
             },
             [canvasBusy, commitCanvas, language, requestImage, t],
@@ -3775,18 +3944,112 @@ window.__ModuleLoader__.load({
             writeStore({ history: [] });
           }, []);
 
+          const switchCanvas = useCallback((id) => {
+            const target = canvasWorkspaceState.current.items.find((item) => item.id === id);
+            if (!target || target.id === activeCanvasIdRef.current) return;
+            flushCanvasWorkspace();
+            canvasRequestSeq.current += 1;
+            canvasWorkspaceState.current = { ...canvasWorkspaceState.current, activeId: target.id };
+            activeCanvasIdRef.current = target.id;
+            canvasState.current = target.state;
+            setCanvasWorkspace(canvasWorkspaceState.current);
+            setActiveCanvasId(target.id);
+            setCanvas(target.state);
+            canvasHist.current = { past: [], future: [] };
+            setCanvasDepth({ undo: 0, redo: 0 });
+            setCanvasSel([]);
+            setCanvasBusy('');
+            setCanvasMsg({ text: '', bad: false });
+            flushCanvasWorkspace();
+          }, [flushCanvasWorkspace]);
+
+          const renameCanvas = useCallback((id, value) => {
+            const current = canvasWorkspaceState.current;
+            const target = current.items.find((item) => item.id === id);
+            if (!target) return;
+            const name = normalizeCanvasName(value, target.name || t('newCanvas'));
+            const workspace = {
+              ...current,
+              items: current.items.map((item) => item.id === id ? { ...item, name, updatedAt: Date.now() } : item),
+            };
+            canvasWorkspaceState.current = workspace;
+            setCanvasWorkspace(workspace);
+            flushCanvasWorkspace();
+          }, [flushCanvasWorkspace, t]);
+
+          const promptRenameCanvas = useCallback(() => {
+            const current = canvasWorkspaceState.current;
+            const target = current.items.find((item) => item.id === activeCanvasIdRef.current);
+            if (!target) return;
+            const value = window.prompt(t('canvasNamePlaceholder'), target.name);
+            if (value !== null) renameCanvas(target.id, value);
+          }, [renameCanvas, t]);
+
+          const deleteCanvas = useCallback((id) => {
+            const current = canvasWorkspaceState.current;
+            if (current.items.length <= 1) return;
+            const target = current.items.find((item) => item.id === id);
+            if (!target) return;
+            if (!window.confirm(t('canvasDeleteAsk'))) return;
+            flushCanvasWorkspace();
+            const wasActive = id === activeCanvasIdRef.current;
+            if (wasActive) {
+              canvasRequestSeq.current += 1;
+              setCanvasBusy('');
+            }
+            const items = current.items.filter((item) => item.id !== id);
+            const nextId = id === current.activeId ? (items[items.length - 1] || items[0]).id : current.activeId;
+            const workspace = { ...current, activeId: nextId, items };
+            const next = items.find((item) => item.id === nextId) || items[0];
+            canvasWorkspaceState.current = workspace;
+            activeCanvasIdRef.current = next.id;
+            canvasState.current = next.state;
+            setCanvasWorkspace(workspace);
+            setActiveCanvasId(next.id);
+            setCanvas(next.state);
+            canvasHist.current = { past: [], future: [] };
+            setCanvasDepth({ undo: 0, redo: 0 });
+            setCanvasSel([]);
+            setCanvasMsg({ text: '', bad: false });
+            flushCanvasWorkspace();
+          }, [flushCanvasWorkspace, t]);
+
           const newCanvas = useCallback(() => {
-            if (canvas.nodes.length > 0 && !window.confirm(t('canvasClearAsk'))) return;
+            const current = canvasWorkspaceState.current;
+            flushCanvasWorkspace();
+            canvasRequestSeq.current += 1;
+            setCanvasBusy('');
+            const now = Date.now();
+            const id = `cw_${now.toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+            const item = { id, name: `${t('newCanvas')} ${current.items.length + 1}`, createdAt: now, updatedAt: now, state: { ...EMPTY_CANVAS } };
+            const items = [...current.items, item];
+            const workspace = { version: 1, activeId: id, items };
+            canvasWorkspaceState.current = workspace;
+            activeCanvasIdRef.current = id;
+            canvasState.current = item.state;
+            setCanvasWorkspace(workspace);
+            setActiveCanvasId(id);
+            setCanvas(item.state);
+            canvasHist.current = { past: [], future: [] };
+            setCanvasDepth({ undo: 0, redo: 0 });
+            setCanvasSel([]);
+            setCanvasMsg({ text: '', bad: false });
+            flushCanvasWorkspace();
+          }, [flushCanvasWorkspace, t]);
+
+          const clearCanvas = useCallback(() => {
+            if (canvasState.current.nodes.length > 0 && !window.confirm(t('canvasClearAsk'))) return;
+            canvasRequestSeq.current += 1;
+            setCanvasBusy('');
             commitCanvas(() => ({ ...EMPTY_CANVAS }));
             setCanvasSel([]);
             setCanvasMsg({ text: '', bad: false });
-          }, [canvas.nodes.length, commitCanvas, t]);
+            flushCanvasWorkspace();
+          }, [commitCanvas, flushCanvasWorkspace, t]);
 
           const newSession = useCallback(async () => {
             if (page === 'canvas') {
-              if (canvas.nodes.length > 0 && !window.confirm(t('canvasClearAsk'))) return;
-              commitCanvas(() => EMPTY_CANVAS);
-              setCanvasMsg({ text: '', bad: false });
+              newCanvas();
               return;
             }
             if (page === 'image') {
@@ -3808,7 +4071,7 @@ window.__ModuleLoader__.load({
             setPatchText('');
             setPreview([]);
             setPreviewError('');
-          }, [page, canvas.nodes.length, commitCanvas, clearPrimaryImage, t]);
+          }, [page, clearPrimaryImage, newCanvas]);
 
           const railRows = useMemo(() => {
             const key = railQuery.trim().toLowerCase();
@@ -4806,6 +5069,22 @@ window.__ModuleLoader__.load({
               'div',
               { className: 'dpf-canvas-tools' },
               h(
+                'div',
+                { className: 'dpf-canvas-workspace', 'aria-label': t('canvasWorkspace') },
+                h(
+                  'select',
+                  {
+                    className: 'dpf-select dpf-canvas-workspace-select',
+                    value: activeCanvasId,
+                    title: t('canvasWorkspace'),
+                    onChange: (event) => switchCanvas(event.target.value),
+                  },
+                  canvasWorkspace.items.map((item) => h('option', { key: item.id, value: item.id }, item.name)),
+                ),
+                h('button', { className: 'dpf-btn dpf-btn-small dpf-canvas-rename', type: 'button', title: t('canvasRenameHint'), onClick: promptRenameCanvas }, t('canvasRename')),
+                h('button', { className: 'dpf-btn dpf-btn-small dpf-canvas-delete', type: 'button', title: t('canvasDelete'), disabled: canvasWorkspace.items.length <= 1, onClick: () => deleteCanvas(activeCanvasId) }, t('canvasDelete')),
+              ),
+              h(
                 'button',
                 { className: 'dpf-btn dpf-btn-small', type: 'button', onClick: () => canvasFile.current?.click() },
                 `＋ ${t('canvasAddImage')}`,
@@ -4951,12 +5230,7 @@ window.__ModuleLoader__.load({
                 {
                   className: 'dpf-btn dpf-btn-small',
                   type: 'button',
-                  onClick: () => {
-                    if (canvas.nodes.length === 0) return;
-                    if (!window.confirm(t('canvasClearAsk'))) return;
-                    commitCanvas(() => ({ ...EMPTY_CANVAS }));
-                    setCanvasSel([]);
-                  },
+                  onClick: clearCanvas,
                 },
                 t('canvasClear'),
               ),
