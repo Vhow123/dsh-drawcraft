@@ -147,6 +147,7 @@ dsh plugin --profile desktop add github:Vhow123/dsh-drawcraft
 
 面板右上角点「无限画布」，正文换成整块画布，随时点「回到绘语」切回去。画布和绘语共用同一套出图通道，选中的「出图模型来自 / 出图模型」两边都生效。
 
+- **新建画布**：工具条有独立的「新建画布」按钮，确认后清空当前节点、连线和视口，从一张空白画布重新开始；左栏的「+ 新建」仍按当前页面统一清场。
 - **平移缩放**：拖空白处平移，滚轮以指针为中心缩放（20%–250%），工具条上有 `−` 滑杆 `＋`、`适配`（把全部节点缩放进窗口）、以及百分比按钮（点一下回到 100%）。双击空白处复位到 100% 并回原点。
 - **小地图**：右下角一块，灰块是节点、蓝框是当前视口。点小地图任意位置，视口就挪过去。画布空的时候不占地方。
 - **节点**：`＋ 加图`（也可直接把图拖进画布、或 `Ctrl+V` 粘贴——剪贴板里是文件就落文件，只有图链就自己抓回来）、`＋ 提示词`。拖节点头部移动，拖右下角改尺寸，头部 `×` 删除，`↓` 下载，`⇢` 把这张图/这段文字送回绘语继续优化。
@@ -168,7 +169,7 @@ dsh plugin --profile desktop add github:Vhow123/dsh-drawcraft
 
 ## 布局
 
-一块面板分成左右两块，位置固定，各自滚动，互不挤动：
+一块面板分成左右两块，位置固定，各自滚动，互不挤动。绘语面板主体采用白色背景与浅灰边框，画布使用浅色点阵，图片大图预览仍保留深色遮罩以保证对比度：
 
 **左栏 214px，不动。** 从上到下是品牌、三个页签（提示词 / 生图 / 画布，横排一格一个）、「+ 新建」、历史记录（搜索框 + 列表，点一条就恢复）、底部当前模型与版本号。历史列表自己滚，滚到头也不会把「新建」推走。
 
@@ -251,7 +252,8 @@ node --test test/*.test.js      # 引擎、画布存储与撤销栈、路由与�
 node test/bare-import.mjs       # 裸加载验证：不重定向任何宿主包直接 import
 node test/client-contract.mjs   # 浏览器半的槽位、词典与渲染钩子契约
 node --check index.js client.js engine.js
-node test/live-sidebar.mjs "http://127.0.0.1:<port>/?token=<TOKEN>"   # 真机：起真实例 + Chrome，点侧边栏入口（必须传带 token URL）
+node test/live-sidebar.mjs "http://127.0.0.1:<port>/?token=<TOKEN>"   # 真机：验证侧边栏入口（必须传带 token URL）
+node test/live-canvas.mjs "http://127.0.0.1:<port>/?token=<TOKEN>"    # 真机：验证新建画布与白色主题（必须传带 token URL）
 ```
 
 前三样都是读源码，读不出「点了没反应」。v1.10.4 就是这么漏过去的：`inject` 少写一个 `layout`，cordis 的 Proxy 一取值就抛错，点击处理器当场炸，而所有静态断言全绿。所以加了第四个：
@@ -263,7 +265,8 @@ node node_modules/@deepseek-ai/dsh/lib/bin.js webdc --port 0 --no-open
 # 日志里会打印 http://127.0.0.1:<port>/?token=<TOKEN>
 
 # 2. 驱动本机 Chrome 去点
-node test/live-sidebar.mjs "http://127.0.0.1:<port>/?token=<TOKEN>"
+node test/live-sidebar.mjs "http://127.0.0.1:<port>/?token=<TOKEN>"   # 侧边栏入口与布局
+node test/live-canvas.mjs "http://127.0.0.1:<port>/?token=<TOKEN>"    # 新建画布与白色主题
 ```
 
 它断言入口存在且与「新会话」同一行、没被浮层盖住、点下去 `.dpf-shell` 真的渲染、左栏 214px、三个页签、页脚都在，并且全程没有 pageerror。会顺手点掉别的插件的「用户须知」遮罩（`.dshp-auth-mask` 会让坐标点击永远落不到入口上）。

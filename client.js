@@ -49,7 +49,7 @@ window.__ModuleLoader__.load({
     // 撤销栈深度。每步存的是整份画布快照，40 步够用又不会把内存撑爆。
     const CANVAS_HISTORY = 40;
     // 页脚显示，用来一眼判断浏览器加载的是哪一版 bundle（缓存排查用）。
-    const BUILD = '1.10.8';
+    const BUILD = '1.10.9';
 
     // Labels are duplicated from engine.js on purpose: client.js is loaded as a
     // separate bundle and cannot import ESM. The host catalog (fetched on open)
@@ -262,6 +262,8 @@ window.__ModuleLoader__.load({
       canvasFit: '适配',
       canvasClear: '清空画布',
       canvasClearAsk: '清空整个画布？这一步不能撤销。',
+      newCanvas: '新建画布',
+      newCanvasHint: '清空当前画布并重新开始',
       canvasToWorkshop: '送去绘语',
       canvasPick: '加到画布',
       canvasGallery: '参考库',
@@ -481,6 +483,8 @@ window.__ModuleLoader__.load({
       canvasFit: 'Fit',
       canvasClear: 'Clear canvas',
       canvasClearAsk: 'Clear the whole canvas? This cannot be undone.',
+      newCanvas: 'New canvas',
+      newCanvasHint: 'Clear this canvas and start over',
       canvasToWorkshop: 'Send to Drawcraft',
       canvasPick: 'Add to canvas',
       canvasGallery: 'Reference library',
@@ -802,6 +806,44 @@ window.__ModuleLoader__.load({
 .dpf-canvas-gal-grid .dpf-gallery-name{font-size:10px;line-height:1.2;max-height:2.4em;overflow:hidden}
 .dpf-canvas-gal-grid .dpf-gallery-canvas{width:16px;height:16px;font-size:10px}
 .dpf-canvas-gal .dpf-gallery-kinds .dpf-kinds-values{max-height:74px}
+/* Drawcraft light surface: keep the host-independent plugin UI readable on white. */
+.dpf-panel{--dsw-alias-bg-primary:#fff;--dsw-alias-bg-elevated:#fff;--dsw-alias-bg-secondary:#f8fafc;--dsw-alias-bg-input:#fff;--dsw-alias-bg-hover:#f1f5f9;--dsw-alias-text-primary:#172033;--dsw-alias-text-secondary:#64748b;--dsw-alias-text-on-primary:#fff;--dsw-alias-border-default:#e2e8f0;--dsw-alias-border-focused:#94a3b8;--dsw-alias-interactive-primary:#1f2937;--dsw-alias-brand-primary:#2563eb;background:#fff;color:#172033;border-color:#e2e8f0;box-shadow:0 26px 96px #0f172a22;color-scheme:light}
+.dpf-embed .dpf-panel{background:#fff}
+.dpf-head,.dpf-topbar,.dpf-foot{border-color:#e2e8f0}
+.dpf-rail{background:#f8fafc;border-color:#e2e8f0}
+.dpf-rail-tabs,.dpf-rail-tab[data-active="1"],.dpf-image-tab[data-active="1"]{background:#e2e8f0;color:#172033}
+.dpf-rail-tab,.dpf-image-tab{color:#64748b}
+.dpf-rail-tab:hover,.dpf-image-tab:hover,.dpf-newbtn:hover,.dpf-icon:hover,.dpf-btn:hover:not(:disabled),.dpf-field:hover,.dpf-rail-item:hover{background:#f1f5f9;color:#172033}
+.dpf-newbtn,.dpf-textarea,.dpf-input,.dpf-select,.dpf-patch input,.dpf-btn,.dpf-card,.dpf-gallery,.dpf-target-form,.dpf-drop,.dpf-thumb,.dpf-gallery-card,.dpf-history-item{background:#fff;border-color:#e2e8f0;color:#172033}
+.dpf-textarea::placeholder,.dpf-input::placeholder,.dpf-patch input::placeholder{color:#94a3b8}
+.dpf-select option{background:#fff;color:#172033}
+.dpf-gallery-card img{background:#f8fafc}
+.dpf-gallery-name,.dpf-gallery-note,.dpf-section-note,.dpf-label,.dpf-subtitle,.dpf-rail-sub,.dpf-rail-head,.dpf-rail-item span,.dpf-rail-empty,.dpf-rail-foot,.dpf-section-title,.dpf-kinds-label,.dpf-gallery-count,.dpf-gallery-hint,.dpf-refshots-hint,.dpf-check,.dpf-target-msg,.dpf-patch-hint,.dpf-field-key,.dpf-history-sub,.dpf-preview-empty{color:#64748b}
+.dpf-prompt{background:#f8fafc;color:#172033;border-color:#e2e8f0}
+.dpf-canvas{background-color:#f8fafc;background-image:radial-gradient(circle at 1px 1px,#cbd5e1 1.4px,transparent 0)}
+.dpf-canvas-node,.dpf-canvas-node[data-kind="text"]{background:#fff;border-color:#cbd5e1;box-shadow:0 12px 40px #0f172a18}
+.dpf-canvas-head{color:#64748b;background:#f8fafc;border-color:#e2e8f0}
+.dpf-canvas-head b,.dpf-canvas-body textarea{color:#172033}
+.dpf-canvas-body{background:#f8fafc}
+.dpf-canvas-note{color:#475569;background:#e2e8f0}
+.dpf-canvas-tools .dpf-btn{background:#fff;border-color:#cbd5e1;color:#172033;box-shadow:0 2px 8px #0f172a12}
+.dpf-canvas-tools .dpf-btn:hover{background:#f1f5f9}
+.dpf-canvas-msg{color:#475569;background:#fff;border:1px solid #e2e8f0;box-shadow:0 2px 8px #0f172a12}
+.dpf-canvas-empty{color:#64748b}
+.dpf-canvas-sep{background:#cbd5e1}
+.dpf-minimap{background:#fff;border-color:#cbd5e1;box-shadow:0 2px 8px #0f172a12}
+.dpf-minimap-node{background:#94a3b8}
+.dpf-canvas-gal{background:#fffffff5;border-color:#cbd5e1;box-shadow:0 18px 48px #0f172a22}
+.dpf-canvas-gal-head b{color:#172033}
+.dpf-canvas-gal .dpf-canvas-x{color:#475569}
+.dpf-canvas-x:hover{background:#e2e8f0;color:#172033}
+.dpf-canvas-resize{background:linear-gradient(135deg,transparent 46%,#94a3b8 47%,#94a3b8 60%,transparent 61%)}
+.dpf-canvas-port{border-color:#fff;box-shadow:0 0 0 1px #2563eb,0 2px 6px #0f172a33}
+.dpf-canvas-badge{background:#2563eb;color:#fff}
+.dpf-canvas-foot{color:#64748b}
+.dpf-panel .dpf-canvas-new{background:#1f2937;color:#fff;border-color:#1f2937}
+.dpf-panel .dpf-canvas-new:hover{background:#111827}
+.dpf-panel .dpf-lightbox,.dpf-panel .dpf-lightbox *{color-scheme:dark}
 `;
 
     // locale 的 translate 是扁平查表（lib/client.js:1433 用 dict[key] 直接取值），
@@ -3733,6 +3775,13 @@ window.__ModuleLoader__.load({
             writeStore({ history: [] });
           }, []);
 
+          const newCanvas = useCallback(() => {
+            if (canvas.nodes.length > 0 && !window.confirm(t('canvasClearAsk'))) return;
+            commitCanvas(() => ({ ...EMPTY_CANVAS }));
+            setCanvasSel([]);
+            setCanvasMsg({ text: '', bad: false });
+          }, [canvas.nodes.length, commitCanvas, t]);
+
           const newSession = useCallback(async () => {
             if (page === 'canvas') {
               if (canvas.nodes.length > 0 && !window.confirm(t('canvasClearAsk'))) return;
@@ -4890,12 +4939,22 @@ window.__ModuleLoader__.load({
               h(
                 'button',
                 {
+                  className: 'dpf-btn dpf-btn-small dpf-btn-primary dpf-canvas-new',
+                  type: 'button',
+                  title: t('newCanvasHint'),
+                  onClick: newCanvas,
+                },
+                `＋ ${t('newCanvas')}`,
+              ),
+              h(
+                'button',
+                {
                   className: 'dpf-btn dpf-btn-small',
                   type: 'button',
                   onClick: () => {
                     if (canvas.nodes.length === 0) return;
                     if (!window.confirm(t('canvasClearAsk'))) return;
-                    commitCanvas(() => ({ nodes: [], edges: [], view: { x: 0, y: 0, scale: 1 } }));
+                    commitCanvas(() => ({ ...EMPTY_CANVAS }));
                     setCanvasSel([]);
                   },
                 },

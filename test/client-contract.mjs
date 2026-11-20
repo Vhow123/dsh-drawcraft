@@ -121,6 +121,9 @@ check('词典无嵌套残留', nested.length === 0, nested.join(','));
 const required = ['meta.title', 'subtitle', 'idea', 'optimize', 'copy', 'historyEmpty'];
 const missing = required.filter((key) => typeof zhFlat[key] !== 'string');
 check('关键文案齐全', missing.length === 0, missing.join(','));
+for (const key of ['newCanvas', 'newCanvasHint']) {
+  check(`新建画布文案 ${key}`, typeof zhFlat[key] === 'string' && zhFlat[key].length > 0 && typeof enFlat[key] === 'string' && enFlat[key].length > 0, `${zhFlat[key]} / ${enFlat[key]}`);
+}
 
 // 清空输入框的按钮：文案要有，且渲染路径确实挂了 dpf-clear 钩子
 check('清空按钮文案', typeof zhFlat.clear === 'string' && zhFlat.clear.length > 0, zhFlat.clear);
@@ -268,6 +271,7 @@ check('输入框里按删除键不删节点', clientSource.includes("if (tag ===
 check('没有图时不拿改图指令硬出图', clientSource.includes('canvasNeedSubject') && clientSource.includes('if (!primary && instruction)'), 'canvas-instruction-guard');
 
 // 画布里的参考库：面板内直接搜、按种类筛、点一张就落到画布
+check('画布有新建画布按钮与独立清空流程', clientSource.includes("const newCanvas = useCallback") && clientSource.includes("t('newCanvas')") && clientSource.includes("className: 'dpf-btn dpf-btn-small dpf-btn-primary dpf-canvas-new'") && clientSource.includes('onClick: newCanvas'), 'canvas-new');
 check('画布有自己的一套参考库 state', clientSource.includes('const [canvasGalOpen, setCanvasGalOpen]') && clientSource.includes('const [canvasGalWorks, setCanvasGalWorks]'), 'canvas-gallery-state');
 check('画布有参考库面板', clientSource.includes("className: 'dpf-canvas-gal'") && clientSource.includes('dpf-canvas-gal-grid'), 'canvas-gallery-panel');
 check('参考库检索在工坊与画布之间共用', clientSource.includes('const fetchGallery = useCallback') && clientSource.includes('const searchCanvasGallery = useCallback'), 'canvas-gallery-shared-fetch');
@@ -345,6 +349,7 @@ check(
   'workshop-opaque-retry',
 );
 
+check('插件整体采用白色主题', clientSource.includes('.dpf-panel{--dsw-alias-bg-primary:#fff') && clientSource.includes('.dpf-canvas{background-color:#f8fafc') && clientSource.includes('color-scheme:light'), 'light-theme');
 check(
   '左栏固定宽度、内容区独立滚动',
   clientSource.includes('.dpf-rail{width:214px;flex:none') &&
