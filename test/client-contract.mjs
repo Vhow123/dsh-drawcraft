@@ -219,8 +219,8 @@ check('节点能送回工坊', clientSource.includes('canvasSendToWorkshop'), 'c
 check('图库缩略图能直接加到画布', clientSource.includes('refToCanvas') && clientSource.includes('dpf-gallery-canvas'), 'canvas-from-gallery');
 
 // 三页结构
-check('顶部有提示词/生图/画布三个页签', clientSource.includes("className: 'dpf-pages'") && clientSource.includes("t('pagePrompt')") && clientSource.includes("t('pageImage')") && clientSource.includes("t('pageCanvas')"), 'pages');
-check('生图页有文生图与图生图两个子页', clientSource.includes("className: 'dpf-side-tab'") && clientSource.includes("setImageTab('text')") && clientSource.includes("setImageTab('edit')"), 'image-tabs');
+check('左栏有提示词/生图/画布三个页签', clientSource.includes("className: 'dpf-rail-tabs'") && clientSource.includes("t('pagePrompt')") && clientSource.includes("t('pageImage')") && clientSource.includes("t('pageCanvas')"), 'pages');
+check('生图页有文生图与图生图两个子页', clientSource.includes("className: 'dpf-image-tab'") && clientSource.includes("setImageTab('text')") && clientSource.includes("setImageTab('edit')"), 'image-tabs');
 check('生图主体区只在图生图子页出现', /imageTab === 'edit' &&\s*h\(/.test(clientSource), 'image-only-edit');
 check('文生图子页忽略手边的主图', clientSource.includes("imageTab === 'edit' ? imageRef.current?.data || '' : ''"), 'text-ignores-subject');
 check('预览卡不在提示词页', clientSource.includes('const previewCard =') && !/dpf-right'[\s\S]{0,4000}dpf-preview/.test(clientSource.split('dpf-right')[1] || ''), 'preview-moved');
@@ -340,6 +340,63 @@ check(
   '工坊图生图也会补一句不透明面料',
   clientSource.includes('body = await submit(primary, `${note || EDIT_PREFIX[language] || EDIT_PREFIX.en}${CANVAS_OPAQUE_NOTE[language]'),
   'workshop-opaque-retry',
+);
+
+check(
+  '左栏固定宽度、内容区独立滚动',
+  clientSource.includes('.dpf-rail{width:214px;flex:none') &&
+    clientSource.includes('.dpf-rail-list{flex:1;min-height:0;overflow:auto') &&
+    clientSource.includes('.dpf-stage{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}'),
+  'rail-fixed',
+);
+check(
+  '左栏列出历史记录，点一条就恢复',
+  clientSource.includes("className: 'dpf-rail-list'") &&
+    clientSource.includes('history.map((entry) =>') &&
+    clientSource.includes('onClick: () => restore(entry)'),
+  'rail-history',
+);
+check(
+  '左栏有新建按钮，按页清空',
+  clientSource.includes('const newSession = useCallback') &&
+    clientSource.includes("h('button', { className: 'dpf-newbtn'") &&
+    clientSource.includes("if (page === 'canvas') {"),
+  'rail-new',
+);
+check(
+  '顶部横栏显示当前页与模型选择',
+  clientSource.includes("className: 'dpf-topbar'") &&
+    clientSource.includes("className: 'dpf-topbar-title'") &&
+    clientSource.includes("className: 'dpf-topbar-note'"),
+  'topbar',
+);
+
+check(
+  '入口与「新会话」按钮左右并排',
+  clientSource.includes('data-drawcraft-tab') &&
+    clientSource.includes('host.nextElementSibling !== tab) host.after(tab)') &&
+    clientSource.includes('data-drawcraft-host') &&
+    clientSource.includes("row.querySelector('nav[class*=\"panelList\"]')") &&
+    clientSource.includes('ctx.layout?.selectPanel') && clientSource.includes('ctx.layout.selectPanel(NS)'),
+  'sidebar-tab',
+);
+check(
+  '不改宿主容器的布局，只做绝对定位',
+  !/\[data-drawcraft-host="1"\]\{display:/.test(clientSource) &&
+    /\[data-drawcraft-host="1"\]\{position:relative\}/.test(clientSource) &&
+    clientSource.includes("const box = host.getBoundingClientRect()"),
+  'sidebar-tab-layout',
+);
+check(
+  '展开时隐藏 panelList 里的重复行，收起时反过来',
+  clientSource.includes('nav[class*=\"panelList\"] button:has([data-dsh-panel-entry=\"dsh-drawcraft\"]){display:none}') &&
+    clientSource.includes('[data-sidebar-collapsed] [data-drawcraft-tab]{display:none}'),
+  'sidebar-tab-dedupe',
+);
+check(
+  '没有真 DOM 时跳过注入',
+  clientSource.includes("typeof document.createElement !== 'function') return () => {}"),
+  'sidebar-tab-guard',
 );
 
 if (fail.length) {

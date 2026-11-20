@@ -49,7 +49,7 @@ window.__ModuleLoader__.load({
     // 撤销栈深度。每步存的是整份画布快照，40 步够用又不会把内存撑爆。
     const CANVAS_HISTORY = 40;
     // 页脚显示，用来一眼判断浏览器加载的是哪一版 bundle（缓存排查用）。
-    const BUILD = '1.9.7';
+    const BUILD = '1.10.4';
 
     // Labels are duplicated from engine.js on purpose: client.js is loaded as a
     // separate bundle and cannot import ESM. The host catalog (fetched on open)
@@ -147,6 +147,11 @@ window.__ModuleLoader__.load({
       breakdown: '画面拆解',
       history: '历史',
       historyEmpty: '还没有生成记录',
+      historyTitle: '历史记录',
+      newSession: '新建',
+      newSessionHint: '清空当前页面，从头开始',
+      historySearch: '搜索历史…',
+      historyNoMatch: '没有匹配的记录',
       copy: '复制',
       copied: '已复制',
       copyField: '复制此字段',
@@ -360,6 +365,11 @@ window.__ModuleLoader__.load({
       breakdown: 'Breakdown',
       history: 'History',
       historyEmpty: 'Nothing generated yet',
+      historyTitle: 'History',
+      newSession: 'New',
+      newSessionHint: 'Clear this page and start over',
+      historySearch: 'Search history…',
+      historyNoMatch: 'No matching entry',
       copy: 'Copy',
       copied: 'Copied',
       copyField: 'Copy this field',
@@ -551,16 +561,41 @@ window.__ModuleLoader__.load({
 .dpf-icon:hover{background:var(--dsw-alias-bg-hover,#ffffff10)}
 .dpf-icon:disabled{opacity:.4;cursor:default}
 .dpf-body{flex:1;min-height:0;display:grid;grid-template-columns:392px minmax(0,1fr)}
-.dpf-pages{display:flex;gap:4px;padding:0 20px;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff12);flex-wrap:wrap}
-.dpf-page{position:relative;appearance:none;border:0;background:none;color:var(--dsw-alias-text-secondary,#8b8b93);font:inherit;font-size:13px;font-weight:600;padding:9px 12px;cursor:pointer;border-radius:7px 7px 0 0}
-.dpf-page:hover{color:var(--dsw-alias-text-primary,#dededf);background:#ffffff0a}
-.dpf-page[data-active="1"]{color:var(--dsw-alias-text-primary,#eee)}
-.dpf-page[data-active="1"]::after{content:"";position:absolute;left:8px;right:8px;bottom:-1px;height:2px;border-radius:2px;background:var(--dsw-alias-brand-primary,#5a8dff)}
-.dpf-body-image{grid-template-columns:128px minmax(0,1fr) minmax(280px,.92fr)}
-.dpf-side{display:flex;flex-direction:column;gap:6px;padding:14px 10px;border-right:1px solid var(--dsw-alias-border-default,#ffffff10);min-height:0;overflow:auto}
-.dpf-side-tab{appearance:none;border:1px solid transparent;background:#ffffff0a;color:var(--dsw-alias-text-secondary,#9a9aa2);font:inherit;font-size:12.5px;padding:8px 6px;border-radius:8px;cursor:pointer;text-align:center}
-.dpf-side-tab:hover{color:var(--dsw-alias-text-primary,#dededf);background:#ffffff12}
-.dpf-side-tab[data-active="1"]{background:#ffffff1f;border-color:var(--dsw-alias-border-default,#ffffff26);color:var(--dsw-alias-text-primary,#eee);font-weight:600}
+.dpf-shell{flex:1;min-height:0;display:flex}
+.dpf-rail{width:214px;flex:none;display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--dsw-alias-border-default,#ffffff12);background:#ffffff05}
+.dpf-rail-brand{display:flex;align-items:center;gap:9px;padding:15px 14px 12px}
+.dpf-rail-brand svg{width:22px;height:22px;flex:none;color:var(--dsw-alias-interactive-primary,#c9b6ff)}
+.dpf-rail-name{font-weight:700;font-size:14px;letter-spacing:.02em}
+.dpf-rail-sub{font-size:10.5px;color:var(--dsw-alias-text-secondary,#7d7d84);margin-top:1px}
+.dpf-rail-tabs{display:flex;gap:2px;margin:0 10px 8px;padding:3px;border-radius:9px;background:#ffffff0d}
+.dpf-rail-tab{flex:1;appearance:none;border:0;background:none;color:var(--dsw-alias-text-secondary,#8b8b93);font:inherit;font-size:12px;font-weight:600;padding:7px 2px;border-radius:7px;cursor:pointer;text-align:center;white-space:nowrap;overflow:hidden}
+.dpf-rail-tab:hover{color:var(--dsw-alias-text-primary,#dededf);background:#ffffff0a}
+.dpf-rail-tab[data-active="1"]{background:#ffffff1f;color:var(--dsw-alias-text-primary,#eee);box-shadow:0 1px 3px #0006}
+.dpf-rail-tab em{font-style:normal;font-size:9.5px;opacity:.55;margin-left:3px;font-variant-numeric:tabular-nums}
+.dpf-newbtn{margin:0 10px 8px;padding:8px 11px;border-radius:8px;border:1px solid var(--dsw-alias-border-default,#ffffff26);background:#ffffff0a;color:var(--dsw-alias-text-primary,#dededf);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;text-align:center}
+.dpf-newbtn:hover{border-color:#ffffff3d;background:#ffffff14}
+.dpf-rail-search{margin:0 10px 6px}
+.dpf-rail-search input{width:100%;background:#ffffff0a;border:1px solid var(--dsw-alias-border-default,#ffffff18);border-radius:7px;color:inherit;font:inherit;font-size:11.5px;padding:5px 8px;outline:none}
+.dpf-rail-search input:focus{border-color:var(--dsw-alias-border-focused,#8d8d95)}
+.dpf-rail-head{display:flex;align-items:center;gap:8px;padding:6px 14px;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--dsw-alias-text-secondary,#7d7d84)}
+.dpf-rail-head button{margin-left:auto;appearance:none;border:0;background:none;color:inherit;font:inherit;font-size:10.5px;text-transform:none;letter-spacing:0;cursor:pointer;opacity:.75}
+.dpf-rail-head button:hover{opacity:1;color:var(--dsw-alias-text-primary,#dededf)}
+.dpf-rail-list{flex:1;min-height:0;overflow:auto;padding:0 8px 10px;display:flex;flex-direction:column;gap:2px}
+.dpf-rail-item{appearance:none;border:0;background:none;color:inherit;font:inherit;text-align:left;padding:7px 8px;border-radius:7px;cursor:pointer;display:flex;flex-direction:column;gap:2px;width:100%}
+.dpf-rail-item:hover{background:#ffffff0f}
+.dpf-rail-item b{font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.dpf-rail-item span{font-size:10.5px;color:var(--dsw-alias-text-secondary,#7d7d84);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.dpf-rail-empty{padding:10px;font-size:11.5px;color:var(--dsw-alias-text-secondary,#7d7d84)}
+.dpf-rail-foot{margin-top:auto;padding:9px 14px;border-top:1px solid var(--dsw-alias-border-default,#ffffff12);font-size:10.5px;color:var(--dsw-alias-text-secondary,#7d7d84);line-height:1.5;word-break:break-all}
+.dpf-stage{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
+.dpf-topbar{display:flex;align-items:center;gap:12px;padding:11px 18px;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff12);flex-wrap:wrap}
+.dpf-topbar-title{font-weight:700;font-size:14.5px;letter-spacing:.02em}
+.dpf-topbar-note{font-size:11.5px;color:var(--dsw-alias-text-secondary,#7d7d84);max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.dpf-body-image{grid-template-columns:minmax(0,1fr) minmax(300px,.92fr)}
+.dpf-image-tabs{display:flex;gap:6px;margin-bottom:14px}
+.dpf-image-tab{appearance:none;border:1px solid transparent;background:#ffffff0a;color:var(--dsw-alias-text-secondary,#9a9aa2);font:inherit;font-size:12.5px;padding:7px 16px;border-radius:999px;cursor:pointer;text-align:center}
+.dpf-image-tab:hover{color:var(--dsw-alias-text-primary,#dededf);background:#ffffff12}
+.dpf-image-tab[data-active="1"]{background:#ffffff1f;border-color:var(--dsw-alias-border-default,#ffffff26);color:var(--dsw-alias-text-primary,#eee);font-weight:600}
 .dpf-image-main{min-height:0;overflow:auto;padding:16px 18px 20px;border-right:1px solid var(--dsw-alias-border-default,#ffffff10)}
 .dpf-image-out{min-height:0;overflow:auto;padding:16px 18px 20px;display:flex;flex-direction:column;gap:12px}
 .dpf-left{min-height:0;overflow:auto;padding:16px 18px 20px;border-right:1px solid var(--dsw-alias-border-default,#ffffff10)}
@@ -752,7 +787,7 @@ window.__ModuleLoader__.load({
 .dpf-minimap-node{position:absolute;background:#ffffff3d;border-radius:1px}
 .dpf-minimap-node[data-kind="text"]{background:#e0b25c4d}
 .dpf-minimap-box{position:absolute;border:1px solid var(--dsw-alias-brand-primary,#5a8dff);background:#5a8dff1f;border-radius:2px}
-@media(max-width:960px){.dpf-backdrop{padding:0}.dpf-panel{height:100%;border-radius:0}.dpf-body{grid-template-columns:1fr;overflow:auto}.dpf-left{border-right:0;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff10);overflow:visible}.dpf-right{overflow:visible}.dpf-picker{width:100%}.dpf-body-image{grid-template-columns:1fr}.dpf-side{flex-direction:row;border-right:0;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff10);padding:10px}.dpf-side-tab{flex:1}.dpf-image-main{border-right:0;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff10)}}
+@media(max-width:960px){.dpf-backdrop{padding:0}.dpf-panel{height:100%;border-radius:0}.dpf-body{grid-template-columns:1fr;overflow:auto}.dpf-left{border-right:0;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff10);overflow:visible}.dpf-right{overflow:visible}.dpf-picker{width:100%}.dpf-body-image{grid-template-columns:1fr}.dpf-shell{flex-direction:column}.dpf-rail{width:100%;border-right:0;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff12)}.dpf-rail-tabs{flex-direction:row}.dpf-rail-tab{flex:1}.dpf-rail-list{max-height:150px}.dpf-image-main{border-right:0;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff10)}}
 .dpf-canvas-foot{position:absolute;right:10px;bottom:10px;font-size:11px;color:#ffffff66;z-index:3;font-variant-numeric:tabular-nums}
 .dpf-canvas-gal{position:absolute;left:10px;bottom:34px;width:392px;max-height:min(62%,calc(100% - 110px));overflow:auto;z-index:7;padding:10px;border-radius:12px;background:#1b1b20f5;border:1px solid #ffffff26;box-shadow:0 18px 48px #000000a6;backdrop-filter:blur(8px)}
 .dpf-canvas-gal-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
@@ -1396,6 +1431,7 @@ window.__ModuleLoader__.load({
           const [running, setRunning] = useState(false);
           const [tab, setTab] = useState('breakdown');
           const [history, setHistory] = useState(Array.isArray(stored.history) ? stored.history.slice(0, HISTORY_LIMIT) : []);
+          const [railQuery, setRailQuery] = useState('');
 
           // 反推图片 / 差量修改 / 直接出图 三块的局部状态
           const [image, setImage] = useState(null);
@@ -3424,6 +3460,41 @@ window.__ModuleLoader__.load({
             writeStore({ history: [] });
           }, []);
 
+          const newSession = useCallback(async () => {
+            if (page === 'canvas') {
+              if (canvas.nodes.length > 0 && !window.confirm(t('canvasClearAsk'))) return;
+              commitCanvas(() => EMPTY_CANVAS);
+              setCanvasMsg({ text: '', bad: false });
+              return;
+            }
+            if (page === 'image') {
+              setImage(null);
+              if (imageRef.current) imageRef.current.value = '';
+              setRefShots([]);
+              setRefs([]);
+              setPreview([]);
+              setPreviewError('');
+              setPreviewStale(false);
+              setEditedPrompt('');
+              setNotice('');
+              return;
+            }
+            setIdea('');
+            setEditedPrompt('');
+            setResult(null);
+            setError('');
+            setNotice('');
+            setPatchText('');
+            setPreview([]);
+            setPreviewError('');
+          }, [page, canvas.nodes.length, commitCanvas, t]);
+
+          const railRows = useMemo(() => {
+            const key = railQuery.trim().toLowerCase();
+            if (!key) return history;
+            return history.filter((entry) => `${entry.title || ''} ${entry.prompt || ''} ${entry.idea || ''}`.toLowerCase().includes(key));
+          }, [history, railQuery]);
+
           const submitOnEnter = useCallback(
             (event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
@@ -3916,21 +3987,13 @@ window.__ModuleLoader__.load({
             { className: 'dpf-body dpf-body-image' },
             h(
               'div',
-              { className: 'dpf-side' },
-              h(
-                'button',
-                { className: 'dpf-side-tab', type: 'button', 'data-active': imageTab === 'text' || undefined, onClick: () => setImageTab('text') },
-                t('imageTabText'),
-              ),
-              h(
-                'button',
-                { className: 'dpf-side-tab', type: 'button', 'data-active': imageTab === 'edit' || undefined, onClick: () => setImageTab('edit') },
-                t('imageTabEdit'),
-              ),
-            ),
-            h(
-              'div',
               { className: 'dpf-image-main' },
+              h(
+                'div',
+                { className: 'dpf-image-tabs' },
+                h('button', { className: 'dpf-image-tab', type: 'button', 'data-active': imageTab === 'text' || undefined, onClick: () => setImageTab('text') }, t('imageTabText')),
+                h('button', { className: 'dpf-image-tab', type: 'button', 'data-active': imageTab === 'edit' || undefined, onClick: () => setImageTab('edit') }, t('imageTabEdit')),
+              ),
               imageTab === 'edit' &&
                 h(
                   'div',
@@ -4837,58 +4900,126 @@ window.__ModuleLoader__.load({
               { className: 'dpf-panel', ref: panelRef, tabIndex: -1, role: 'dialog', 'aria-modal': !embedded, 'aria-label': t('meta.title') },
               h('style', null, css),
               h(
-                'header',
-                { className: 'dpf-head' },
-                icon,
-                h('div', null, h('div', { className: 'dpf-title' }, t('meta.title')), h('div', { className: 'dpf-subtitle' }, t('subtitle'))),
-                h('div', { className: 'dpf-spacer' }),
+                'div',
+                { className: 'dpf-shell' },
+                h(
+                  'aside',
+                  { className: 'dpf-rail' },
+                  h(
+                    'div',
+                    { className: 'dpf-rail-brand' },
+                    icon,
+                    h('div', null, h('div', { className: 'dpf-rail-name' }, t('meta.title')), h('div', { className: 'dpf-rail-sub' }, t('subtitle'))),
+                  ),
+                  h(
+                    'div',
+                    { className: 'dpf-rail-tabs' },
+                    h(
+                      'button',
+                      { className: 'dpf-rail-tab', type: 'button', 'data-active': page === 'prompt' || undefined, onClick: () => setPage('prompt') },
+                      t('pagePrompt'),
+                      result ? h('em', null, '●') : null,
+                    ),
+                    h(
+                      'button',
+                      { className: 'dpf-rail-tab', type: 'button', 'data-active': page === 'image' || undefined, onClick: () => setPage('image') },
+                      t('pageImage'),
+                      preview.length ? h('em', null, String(preview.length)) : null,
+                    ),
+                    h(
+                      'button',
+                      {
+                        className: 'dpf-rail-tab',
+                        type: 'button',
+                        'data-active': page === 'canvas' || undefined,
+                        onClick: () => {
+                          setPage('canvas');
+                          setCanvasMsg({ text: '', bad: false });
+                        },
+                      },
+                      t('pageCanvas'),
+                      canvas.nodes.length ? h('em', null, String(canvas.nodes.length)) : null,
+                    ),
+                  ),
+                  h('button', { className: 'dpf-newbtn', type: 'button', title: t('newSessionHint'), onClick: () => void newSession() }, `+ ${t('newSession')}`),
+                  h(
+                    'div',
+                    { className: 'dpf-rail-head' },
+                    t('historyTitle'),
+                    history.length > 0 ? h('button', { type: 'button', onClick: clearHistory }, t('clearHistory')) : null,
+                  ),
+                  history.length > 0
+                    ? h(
+                        'div',
+                        { className: 'dpf-rail-search' },
+                        h('input', {
+                          type: 'search',
+                          value: railQuery,
+                          placeholder: t('historySearch'),
+                          maxLength: 40,
+                          onChange: (event) => setRailQuery(event.target.value),
+                        }),
+                      )
+                    : null,
+                  h(
+                    'div',
+                    { className: 'dpf-rail-list' },
+                    railRows.length
+                      ? railRows.map((entry) =>
+                          h(
+                            'button',
+                            { key: entry.id, className: 'dpf-rail-item', type: 'button', onClick: () => restore(entry), title: entry.title || t('untitled') },
+                            h('b', null, entry.title || t('untitled')),
+                            h('span', null, `${timeLabel(entry.at)} · ${dialectLabel(entry.dialect)}`),
+                          ),
+                        )
+                      : h('div', { className: 'dpf-rail-empty' }, history.length ? t('historyNoMatch') : t('historyEmpty')),
+                  ),
+                  h(
+                    'div',
+                    { className: 'dpf-rail-foot' },
+                    modelReady ? `${provider} · ${model}` : t('noModel'),
+                    h('br', null),
+                    `v${BUILD}`,
+                  ),
+                ),
                 h(
                   'div',
-                  { className: 'dpf-picker' },
-                  catalogLoading
-                    ? h('span', { className: 'dpf-pill' }, t('loadingCatalog'))
-                    : h(
-                        'select',
-                        {
-                          className: 'dpf-select',
-                          style: { width: 'auto', maxWidth: 320 },
-                          value: model ? `${provider}\u0000${model}` : '',
-                          title: t('model'),
-                          onChange: (event) => pickModel(event.target.value),
-                        },
-                        h('option', { value: '' }, modelOptions.length ? t('chooseModel') : t('catalogEmpty')),
-                        groups
-                          .filter((group) => group.models.length)
-                          .map((group) =>
-                            h(
-                              'optgroup',
-                              { key: group.provider, label: group.name },
-                              group.models.map((item) => h('option', { key: `${group.provider}\u0000${item.id}`, value: `${group.provider}\u0000${item.id}` }, item.name)),
+                  { className: 'dpf-stage' },
+                  h(
+                    'header',
+                    { className: 'dpf-topbar' },
+                    h('span', { className: 'dpf-topbar-title' }, page === 'canvas' ? t('pageCanvas') : page === 'image' ? t('pageImage') : t('pagePrompt')),
+                    h('span', { className: 'dpf-topbar-note' }, page === 'canvas' ? t('canvasHint') : page === 'image' ? t('imageOutHint') : t('subtitle')),
+                    h('div', { className: 'dpf-spacer' }),
+                    h(
+                      'div',
+                      { className: 'dpf-picker' },
+                    catalogLoading
+                      ? h('span', { className: 'dpf-pill' }, t('loadingCatalog'))
+                      : h(
+                          'select',
+                          {
+                            className: 'dpf-select',
+                            style: { width: 'auto', maxWidth: 320 },
+                            value: model ? `${provider}\u0000${model}` : '',
+                            title: t('model'),
+                            onChange: (event) => pickModel(event.target.value),
+                          },
+                          h('option', { value: '' }, modelOptions.length ? t('chooseModel') : t('catalogEmpty')),
+                          groups
+                            .filter((group) => group.models.length)
+                            .map((group) =>
+                              h(
+                                'optgroup',
+                                { key: group.provider, label: group.name },
+                                group.models.map((item) => h('option', { key: `${group.provider}\u0000${item.id}`, value: `${group.provider}\u0000${item.id}` }, item.name)),
+                              ),
                             ),
-                          ),
-                      ),
-                  h('button', { className: 'dpf-icon', type: 'button', title: t('close'), onClick: closePanel }, '×'),
-                ),
-              ),
-              h(
-                'div',
-                { className: 'dpf-pages' },
-                h(
-                  'button',
-                  { className: 'dpf-page', type: 'button', 'data-active': page === 'prompt' || undefined, onClick: () => setPage('prompt') },
-                  t('pagePrompt'),
-                ),
-                h(
-                  'button',
-                  { className: 'dpf-page', type: 'button', 'data-active': page === 'image' || undefined, onClick: () => setPage('image') },
-                  t('pageImage'),
-                ),
-                h(
-                  'button',
-                  { className: 'dpf-page', type: 'button', 'data-active': page === 'canvas' || undefined, onClick: () => { setPage('canvas'); setCanvasMsg({ text: '', bad: false }); } },
-                  t('pageCanvas'),
-                ),
-              ),
+                        ),
+                    h('button', { className: 'dpf-icon', type: 'button', title: t('close'), onClick: closePanel }, '×'),
+                    ),
+                  ),
               canvasView
                 ? canvasBody
                 : page === 'image'
@@ -5274,6 +5405,8 @@ window.__ModuleLoader__.load({
                 h('span', null, t('footnote')),
                 h('span', null, modelReady ? `${provider} · ${model} · v${BUILD}` : `${t('noModel')} · v${BUILD}`),
               ),
+                ),
+              ),
             ),
             lightbox &&
               h(
@@ -5347,7 +5480,7 @@ window.__ModuleLoader__.load({
             {
               name: 'sidebar.panellist',
               id: NS,
-              order: 40,
+              order: -10,
               label: () => ctx.locale.bind(NS)('meta.title'),
             },
             PanelEntry,
@@ -5357,6 +5490,95 @@ window.__ModuleLoader__.load({
         ctx.slots.inject('main', () =>
           ctx.slots.register({ name: 'main', key: NS }, PanelPage),
         );
+
+        // 入口钉在「新会话」按钮正上方——dsh-imagegen 关掉那对「会话 / 生图」页签后空出来的位置。
+        // 宿主只提供 sidebar.panellist 槽，而槽渲染在按钮下面，所以这里自己插一段 DOM 补位。
+        ctx.effect(() => {
+          // 单测与 SSR 环境下没有真 DOM，直接跳过。
+          if (typeof document === 'undefined' || typeof document.createElement !== 'function') return () => {};
+          const NEW_SESSION = 'button[data-dsh-part="new-session"], button[class*="newSession"]';
+          const STYLE_ID = 'drawcraft-tab-style';
+          const style = document.createElement('style');
+          style.id = STYLE_ID;
+          style.textContent = [
+            // 不动宿主容器的布局——它同时装着品牌、新会话、panelList、工作区，改 display 会把整条侧边栏压塌。
+            // 只给它加 position:relative，然后把按钮绝对定位到「新会话」右侧那条空位上。
+            '[data-drawcraft-host="1"]{position:relative}',
+            '[data-drawcraft-host="1"] button[class*="newSession"]{padding-right:84px}',
+            '[data-drawcraft-host="1"] button[class*="newSession"] [class*="newSessionShortcut"]{display:none}',
+            '[data-sidebar-collapsed] [data-drawcraft-host="1"] button[class*="newSession"]{padding-right:0}',
+            '[data-drawcraft-tab]{position:absolute;right:12px;width:70px;display:flex;align-items:center;',
+            'justify-content:center;gap:5px;box-sizing:border-box;padding:0 6px;border-radius:8px;',
+            'border:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.12));background:transparent;',
+            'color:inherit;font:inherit;font-size:11.5px;line-height:1;cursor:pointer;white-space:nowrap}',
+            '[data-drawcraft-tab]:hover{background:var(--dsw-specific-sidebar-nav-item-hover,rgba(0,0,0,.06))}',
+            '[data-drawcraft-tab] svg{width:13px;height:13px;flex:none}',
+            'nav[class*="panelList"] button:has([data-dsh-panel-entry="dsh-drawcraft"]){display:none}',
+            '[data-sidebar-collapsed] nav[class*="panelList"] button:has([data-dsh-panel-entry="dsh-drawcraft"]){display:flex}',
+            '[data-sidebar-collapsed] [data-drawcraft-tab]{display:none}',
+          ].join('');
+
+          let tab = null;
+          const open = () => {
+            if (typeof ctx.layout?.selectPanel === 'function') {
+              ctx.layout.selectPanel(NS);
+              return;
+            }
+            const entry = document.querySelector(`[data-dsh-panel-entry="${NS}"]`);
+            const row = entry && entry.closest('button');
+            if (row) row.click();
+          };
+
+          const ensure = () => {
+            const host = document.querySelector(NEW_SESSION);
+            if (!host || !host.parentElement) return;
+            if (!document.getElementById(STYLE_ID)) document.head.appendChild(style);
+            if (!tab) {
+              tab = document.createElement('button');
+              tab.type = 'button';
+              tab.setAttribute('data-drawcraft-tab', '');
+              tab.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.6 13.4 3.3 10.4 10.4 3.3a1.65 1.65 0 0 1 2.33 2.33L5.6 12.7l-3 .7Z"/><path d="m9.55 4.15 2.3 2.3"/><path d="M12.3 10.4h3.1M13.85 8.85v3.1"/></svg><span></span>';
+              tab.addEventListener('click', open);
+            }
+            const label = tab.querySelector('span');
+            if (label) label.textContent = ctx.locale.bind(NS)('meta.title');
+            tab.title = ctx.locale.bind(NS)('meta.title');
+            // 「新会话」外面可能还套着一层 Tooltip，找真正同时装着 panelList 的那一层当定位基准。
+            let row = host.parentElement;
+            while (row && row !== document.body && !row.querySelector('nav[class*="panelList"]')) {
+              row = row.parentElement;
+            }
+            if (!row || row === document.body) row = host.parentElement;
+            if (!row || row === document.body) return;
+            row.setAttribute('data-drawcraft-host', '1');
+            if (host.nextElementSibling !== tab) host.after(tab);
+            // 贴着「新会话」按钮的真实位置走——它外面可能套 Tooltip，offsetTop 未必相对 row。
+            const box = host.getBoundingClientRect();
+            const base = row.getBoundingClientRect();
+            tab.style.top = `${box.top - base.top + row.scrollTop}px`;
+            tab.style.height = `${box.height}px`;
+          };
+
+          let frame = 0;
+          const schedule = () => {
+            if (frame) return;
+            frame = requestAnimationFrame(() => {
+              frame = 0;
+              ensure();
+            });
+          };
+
+          const observer = new MutationObserver(schedule);
+          observer.observe(document.body, { childList: true, subtree: true });
+          schedule();
+
+          return () => {
+            observer.disconnect();
+            if (frame) cancelAnimationFrame(frame);
+            tab?.remove();
+            style.remove();
+          };
+        }, 'dsh-drawcraft: sidebar tab');
       },
     };
   },
