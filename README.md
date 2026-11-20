@@ -247,11 +247,26 @@ C:\Users\Administrator\.dsh\profiles\desktop\node_modules\@dickpy\dsh-imagegen\l
 ## 开发
 
 ```bash
-node --test test/*.test.js      # 引擎、画布存储与撤销栈、路由与工具契约单测（52 项）
+node --test test/*.test.js      # 引擎、画布存储与撤销栈、路由与工具契约单测（57 项）
 node test/bare-import.mjs       # 裸加载验证：不重定向任何宿主包直接 import
 node test/client-contract.mjs   # 浏览器半的槽位、词典与渲染钩子契约
 node --check index.js client.js engine.js
+node test/live-sidebar.mjs "<带 token 的地址>"   # 真机：起真实例 + Chrome，点侧边栏入口
 ```
+
+前三样都是读源码，读不出「点了没反应」。v1.10.4 就是这么漏过去的：`inject` 少写一个 `layout`，cordis 的 Proxy 一取值就抛错，点击处理器当场炸，而所有静态断言全绿。所以加了第四个：
+
+```bash
+# 1. 起一个真的实例（desktop profile 被 Electron 独占，复制一份再装插件）
+cd D:/deepseek/resources/app/dsh
+node node_modules/@deepseek-ai/dsh/lib/bin.js webdc --port 0 --no-open
+# 日志里会打印 http://127.0.0.1:<port>/?token=<TOKEN>
+
+# 2. 驱动本机 Chrome 去点
+node test/live-sidebar.mjs "http://127.0.0.1:<port>/?token=<TOKEN>"
+```
+
+它断言入口存在且与「新会话」同一行、没被浮层盖住、点下去 `.dpf-shell` 真的渲染、左栏 214px、三个页签、页脚都在，并且全程没有 pageerror。会顺手点掉别的插件的「用户须知」遮罩（`.dshp-auth-mask` 会让坐标点击永远落不到入口上）。
 
 `bare-import.mjs` 是本插件必须常驻的回归线：插件用 junction 链接进 profile，真实路径在 DSH 安装目录之外，Node 的 ESM 解析会从真实路径向上找 `node_modules`，够不到 `@deepseek-ai/*`。所以插件**不 import 任何宿主包**，工具定义用自带的 `defineTool` 最小实现（声明式参数表 → JSON Schema + 必填/类型校验），产出对象与宿主 `tools.register()` 期望的形状一致。
 

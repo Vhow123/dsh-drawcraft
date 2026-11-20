@@ -55,7 +55,8 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "check": "node --check index.js && node --check client.js && node --check engine.js",
-    "verify": "node test/bare-import.mjs && node test/client-contract.mjs"
+    "verify": "node test/bare-import.mjs && node test/client-contract.mjs",
+    "verify:live": "node test/live-sidebar.mjs"
   },
   "files": [
     "index.js",
