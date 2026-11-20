@@ -84,7 +84,10 @@ const contract = bundle.factory((specifier) => {
   throw new Error(`未预期的 require: ${specifier}`);
 });
 
-check('inject 声明', Array.isArray(contract.inject) && contract.inject.join(',') === 'slots,locale', String(contract.inject));
+// layout 必须声明：cordis 的 Proxy 在未 inject 时读 ctx.layout 会直接抛
+// 「cannot get property "layout" without inject」，点击处理器当场炸掉，
+// 表现就是侧边栏点入口完全没反应。真机复现过，别再删。
+check('inject 声明', Array.isArray(contract.inject) && contract.inject.join(',') === 'slots,locale,layout', String(contract.inject));
 
 const ctx = { slots, locale, effect: (fn) => fn() };
 contract.apply(ctx);
@@ -397,6 +400,14 @@ check(
   '没有真 DOM 时跳过注入',
   clientSource.includes("typeof document.createElement !== 'function') return () => {}"),
   'sidebar-tab-guard',
+);
+// 点击必须三条路兜底：selectPanel 抛错、面板行点击失败，都不能让点击变哑巴。
+check(
+  '点开面板有三条兜底，任何一条抛错都不会没反应',
+  clientSource.includes('layout.selectPanel failed') &&
+    clientSource.includes('panel row click failed') &&
+    clientSource.includes('no way to open the panel'),
+  'sidebar-tab-open',
 );
 
 if (fail.length) {

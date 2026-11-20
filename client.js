@@ -49,7 +49,7 @@ window.__ModuleLoader__.load({
     // 撤销栈深度。每步存的是整份画布快照，40 步够用又不会把内存撑爆。
     const CANVAS_HISTORY = 40;
     // 页脚显示，用来一眼判断浏览器加载的是哪一版 bundle（缓存排查用）。
-    const BUILD = '1.10.4';
+    const BUILD = '1.10.5';
 
     // Labels are duplicated from engine.js on purpose: client.js is loaded as a
     // separate bundle and cannot import ESM. The host catalog (fetched on open)
@@ -814,7 +814,9 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ['slots', 'locale'],
+      // layout 必须声明：cordis 的 Proxy 在未 inject 时读 ctx.layout 会直接抛
+      // 「cannot get property "layout" without inject」，可选链挡不住，点击处理器当场炸掉。
+      inject: ['slots', 'locale', 'layout'],
       apply(ctx) {
         ctx.effect(
           () => ctx.locale.register(NS, { zh: flattenDict(zh), en: flattenDict(en) }),
@@ -5520,13 +5522,26 @@ window.__ModuleLoader__.load({
 
           let tab = null;
           const open = () => {
-            if (typeof ctx.layout?.selectPanel === 'function') {
-              ctx.layout.selectPanel(NS);
-              return;
+            // 三条路依次试，任何一条抛错都不能让点击变哑巴。
+            try {
+              if (typeof ctx.layout?.selectPanel === 'function') {
+                ctx.layout.selectPanel(NS);
+                return;
+              }
+            } catch (failure) {
+              console.warn('[drawcraft] layout.selectPanel failed', failure);
             }
-            const entry = document.querySelector(`[data-dsh-panel-entry="${NS}"]`);
-            const row = entry && entry.closest('button');
-            if (row) row.click();
+            try {
+              const entry = document.querySelector(`[data-dsh-panel-entry="${NS}"]`);
+              const row = entry && entry.closest('button');
+              if (row) {
+                row.click();
+                return;
+              }
+            } catch (failure) {
+              console.warn('[drawcraft] panel row click failed', failure);
+            }
+            console.warn('[drawcraft] no way to open the panel', { NS });
           };
 
           const ensure = () => {

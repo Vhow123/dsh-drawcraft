@@ -191,7 +191,9 @@ dsh plugin --profile desktop add github:Vhow123/dsh-drawcraft
 3. 绘语按钮 `position:absolute`，`top` / `height` 从「新会话」按钮的 `getBoundingClientRect()` 现算，不猜 padding；「新会话」加 `padding-right` 让出位置，收起快捷键提示；
 4. `MutationObserver` 盯着宿主重渲染，被冲掉就补回去。
 
-点它走 `ctx.layout.selectPanel(NS)`，没有这个 API 时退化成点 `panelList` 里那一行。
+点它走 `ctx.layout.selectPanel(NS)`，没有这个 API 时退化成点 `panelList` 里那一行，再不行打日志——三条路，任何一条抛错都不会让点击变哑巴。
+
+**`layout` 必须写进 `inject`。** cordis 的服务是 Proxy，没声明就取值会直接抛 `cannot get property "layout" without inject`，`ctx.layout?.selectPanel` 里的 `?.` 挡不住它——v1.10.4 就是栽在这里：入口画得好好的，点下去毫无反应，因为点击处理器第一句就炸了。查这个问题的办法不是读代码猜，是起一个真的 web 实例用 Chrome 驱动去点：`git show HEAD:client.js` 装回旧版能稳定复现那条报错且面板不出现，换回新版就没有。
 
 槽里那一行仍然注册着（`order: -10`），但展开时用 CSS 隐藏，只在侧边栏收起成图标条时才显示——这样两种状态都有入口，又不会看到两个「绘语」。
 

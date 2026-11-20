@@ -1,5 +1,13 @@
 # 更新日志
 
+## v1.10.5
+
+- 修「点绘语入口完全没反应」。根因是 `inject` 里少了 `layout`：cordis 的 Proxy 在没声明的服务上取值会直接抛 `cannot get property "layout" without inject`，而点击处理器第一句就是读 `ctx.layout`，可选链 `?.` 挡不住 get trap 抛错，处理器当场炸掉，面板自然打不开。
+- `inject` 改成 `['slots', 'locale', 'layout']`。
+- 点开面板改成三条路兜底：`ctx.layout.selectPanel(NS)` → 点宿主面板行 → 打日志。前两条任意一条抛错都不会让点击变哑巴。
+- 这一版开始不再只跑单测：起一个真实的 DSH web 实例 + 真实 Chrome 驱动，用 `git show HEAD:client.js` 装回上一版复现出 `cannot get property "layout" without inject` 且面板不出现，换回修复版后无报错、面板正常渲染，真机量到左栏 214px、三个页签、生图页两栏都在。
+- 契约把 `inject` 断言收紧成必须含 `layout`，并新增一条断言点击的三条兜底路径。
+
 ## v1.10.4
 
 - 修 v1.10.3 把侧边栏压塌的问题：上一版给「新会话」的父容器加了 `display:flex` + 子元素 `flex:1 1 100%`，而那个容器同时装着品牌、面板列表和工作区，整条侧边栏被挤扁，只剩底部一个按钮。
