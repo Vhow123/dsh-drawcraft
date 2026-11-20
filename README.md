@@ -131,7 +131,7 @@ dsh plugin --profile desktop add github:Vhow123/dsh-drawcraft
 
 三个原因叠在一起，v1.9.2 都改了：
 
-1. **主图选错**。画布原来按节点顺序取第一张图当主体。姿势白模、深度图、服装人台排在真人照片前面时，模型就照着那个白模画，出来是 3D 素模或二次元。现在出图前给候选图打分（肤色像素占比：真人照 10% 以上，白模与深度图基本是 0），最像真人照片的那张才当主图。
+1. **主图选错**。画布原来按节点顺序取第一张图当主体。姿势白模、深度图、服装人台排在真人照片前面时，模型就照着那个白模画，出来是 3D 素模或二次元。现在按连线顺序取第一张图当主图，除非手动点 `◎` 指定主体；不再靠肤色像素猜测。
 2. **附加参考被当成画风样板**。服装库是 3D 人台渲染，姿势库是白模/深度图，模型会把它们的材质与光照一起抄。现在带附加参考时会明说「只取版型与姿态，不要复制肤色、材质、光照与渲染风格」。
 3. **提示词太短**。只写一句「头发换成双马尾」，模型自己挑风格就挑了插画。现在默认补一条写实约束，提示词里明确要插画/动漫时才会让位。
 
@@ -226,7 +226,7 @@ C:\Users\Administrator\.dsh\profiles\desktop\node_modules\@dickpy\dsh-imagegen\l
 ## 配置
 
 - `~/.dsh/drawcraft.json`：provider / model / 方言 / 风格 / 语言 / 画幅 / 候选数，`/optimize` 带 `remember: true` 时写入。
-- 浏览器 localStorage `dsh-drawcraft:v1`（旧键 `dsh-image-prompt-forge:v1` 会在第一次打开时自动搬过来）：面板上的选择与最近 24 条历史。
+- 浏览器 localStorage `dsh-drawcraft:v1`（旧键 `dsh-image-prompt-forge:v1` 会在第一次打开时自动搬过来）：面板选择、来源/渠道/模型、参考图与最近 24 条历史；画布单独存于 `dsh-drawcraft:canvas:v1`。
 
 ## 接口
 
@@ -247,11 +247,11 @@ C:\Users\Administrator\.dsh\profiles\desktop\node_modules\@dickpy\dsh-imagegen\l
 ## 开发
 
 ```bash
-node --test test/*.test.js      # 引擎、画布存储与撤销栈、路由与工具契约单测（57 项）
+node --test test/*.test.js      # 引擎、画布存储与撤销栈、路由与工具契约单测（63 项）
 node test/bare-import.mjs       # 裸加载验证：不重定向任何宿主包直接 import
 node test/client-contract.mjs   # 浏览器半的槽位、词典与渲染钩子契约
 node --check index.js client.js engine.js
-node test/live-sidebar.mjs "<带 token 的地址>"   # 真机：起真实例 + Chrome，点侧边栏入口
+node test/live-sidebar.mjs "http://127.0.0.1:<port>/?token=<TOKEN>"   # 真机：起真实例 + Chrome，点侧边栏入口（必须传带 token URL）
 ```
 
 前三样都是读源码，读不出「点了没反应」。v1.10.4 就是这么漏过去的：`inject` 少写一个 `layout`，cordis 的 Proxy 一取值就抛错，点击处理器当场炸，而所有静态断言全绿。所以加了第四个：
@@ -287,9 +287,9 @@ client.js           浏览器半：侧边栏 panellist 图标 + 主区面板 + �
 engine.js           纯函数引擎：目录、三种方向的提示词构造、方言规整、LLM 调用与错误映射
 gallery.js          参考库桥接：索引缓存、检索、CDN 图链、拼装注入块（唯一做网络 IO 的文件）
 cordis.patch.yml    bundle 补丁：把自己 insert 进插件树
-test/               引擎单测 + 等高线算法 + 路由契约 + 裸加载验证 + 浏览器半契约
+test/               开发期引擎单测 + 等高线算法 + 路由契约 + 裸加载验证 + 浏览器半契约（不随 npm 包发布）
 ```
-预览图支持点击看大图：滚轮以指针为中心缩放（20%–800%）、按住拖动平移、双击在 100% 与 200% 之间切换，底部有 −／倍率／+ 与保存。
+预览图支持点击看大图：滚轮以指针为中心缩放（20%–800%）、按住拖动平移、双击在 100% 与 200% 之间切换，底部有 −／倍率／+ 与保存。自带端点仅接受有效的公网图片 URL 或带图片魔数的 base64，内网地址、重定向到内网地址和伪造图片数据会被丢弃。
 
 ## 更新日志
 

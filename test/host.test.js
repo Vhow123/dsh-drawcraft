@@ -244,7 +244,7 @@ test('render relays to the configured endpoint', { skip }, async () => {
     req.on('end', () => {
       seen.push({ url: req.url, auth: req.headers.authorization, bytes: Buffer.concat(chunks).length });
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ data: [{ b64_json: 'aGVsbG8=' }] }));
+      res.end(JSON.stringify({ data: [{ b64_json: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', mime: 'image/png' }] }));
     });
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -258,10 +258,106 @@ test('render relays to the configured endpoint', { skip }, async () => {
     assert.ok(id, 'target must exist before relaying');
     const out = await call('/api/drawcraft/render', { targetId: id, prompt: 'a paper boat', mode: 'text' });
     assert.equal(out.body.ok, true);
-    assert.equal(out.body.images[0].b64, 'aGVsbG8=');
+    assert.match(out.body.images[0].b64, /^iVBORw0KGgo/);
     assert.equal(seen.length, 1);
     assert.equal(seen[0].url, '/v1/images/generations');
     assert.equal(seen[0].auth, 'Bearer sk-relay');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('render rejects non-json upstream responses', { skip }, async () => {
+  const { createServer } = await import('node:http');
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/plain' });
+    res.end('not json');
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  try {
+    const saved = await call('/api/drawcraft/targets', {
+      action: 'save',
+      target: { label: 'content-type-demo', baseUrl: `http://127.0.0.1:${port}/v1`, models: ['m1'] },
+    });
+    const id = saved.body.targets.find((item) => item.label === 'content-type-demo').id;
+    const out = await call('/api/drawcraft/render', { targetId: id, prompt: 'x' });
+    assert.equal(out.body.ok, false);
+    assert.equal(out.body.code, 'upstream-content-type');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('render drops oversized inline base64 images', { skip }, async () => {
+  const { createServer } = await import('node:http');
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ data: [{ b64_json: 'A'.repeat(17 * 1024 * 1024) }] }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  try {
+    const saved = await call('/api/drawcraft/targets', {
+      action: 'save',
+      target: { label: 'size-demo', baseUrl: `http://127.0.0.1:${port}/v1`, models: ['m1'] },
+    });
+    const id = saved.body.targets.find((item) => item.label === 'size-demo').id;
+    const out = await call('/api/drawcraft/render', { targetId: id, prompt: 'x' });
+    assert.equal(out.body.ok, false);
+    assert.equal(out.body.code, 'empty');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('render rejects inline data that is not an image', { skip }, async () => {
+  const { createServer } = await import('node:http');
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ data: [{ b64_json: 'not-base64' }] }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  try {
+    const saved = await call('/api/drawcraft/targets', {
+      action: 'save',
+      target: { label: 'bad-base64-demo', baseUrl: `http://127.0.0.1:${port}/v1`, models: ['m1'] },
+    });
+    const id = saved.body.targets.find((item) => item.label === 'bad-base64-demo').id;
+    const out = await call('/api/drawcraft/render', { targetId: id, prompt: 'x' });
+    assert.equal(out.body.ok, false);
+    assert.equal(out.body.code, 'empty');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('render rejects an upstream image URL that points to loopback', { skip }, async () => {
+  const { createServer } = await import('node:http');
+  let imageFetches = 0;
+  const server = createServer((req, res) => {
+    if (req.url === '/private.png') {
+      imageFetches += 1;
+      res.writeHead(200, { 'content-type': 'image/png' });
+      res.end(Buffer.from('iVBORw0KGgo=', 'base64'));
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ data: [{ url: `http://127.0.0.1:${server.address().port}/private.png` }] }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  try {
+    const saved = await call('/api/drawcraft/targets', {
+      action: 'save',
+      target: { label: 'private-url-demo', baseUrl: `http://127.0.0.1:${port}/v1`, models: ['m1'] },
+    });
+    const id = saved.body.targets.find((item) => item.label === 'private-url-demo').id;
+    const out = await call('/api/drawcraft/render', { targetId: id, prompt: 'x' });
+    assert.equal(out.body.ok, false);
+    assert.equal(out.body.code, 'empty');
+    assert.equal(imageFetches, 0);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -277,7 +373,7 @@ test('render sends a multipart edit when a subject image is attached', { skip },
       const raw = Buffer.concat(chunks).toString('utf8');
       seen.push({ url: req.url, type: req.headers['content-type'] || '', hasImage: raw.includes('name="image"'), hasExtras: raw.includes('name="image[]"') });
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ data: [{ b64_json: 'aGVsbG8=' }] }));
+      res.end(JSON.stringify({ data: [{ b64_json: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', mime: 'image/png' }] }));
     });
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));

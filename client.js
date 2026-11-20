@@ -49,7 +49,7 @@ window.__ModuleLoader__.load({
     // 撤销栈深度。每步存的是整份画布快照，40 步够用又不会把内存撑爆。
     const CANVAS_HISTORY = 40;
     // 页脚显示，用来一眼判断浏览器加载的是哪一版 bundle（缓存排查用）。
-    const BUILD = '1.10.5';
+    const BUILD = '1.10.8';
 
     // Labels are duplicated from engine.js on purpose: client.js is loaded as a
     // separate bundle and cannot import ESM. The host catalog (fetched on open)
@@ -267,6 +267,7 @@ window.__ModuleLoader__.load({
       canvasGallery: '参考库',
       canvasCarded: '已转成姿态卡重试',
       canvasOpaqued: '已按不透明面料重试',
+      canvasRefsMissing: '部分参考图已丢失，已按现有参考继续重试',
       canvasGalleryHint: '点一张就落到画布，拖线接到任意节点',
       canvasApplyNode: '用到选中的节点',
       canvasApplied: '已用上',
@@ -485,6 +486,7 @@ window.__ModuleLoader__.load({
       canvasGallery: 'Reference library',
       canvasCarded: 'retried as a pose card',
       canvasOpaqued: 'retried with opaque fabric',
+      canvasRefsMissing: 'Some saved references are missing; retrying with the references still available',
       canvasGalleryHint: 'Click one to drop it on the canvas, then wire it to any node',
       canvasApplyNode: 'Apply to selected node',
       canvasApplied: 'Applied',
@@ -549,7 +551,7 @@ window.__ModuleLoader__.load({
 .dpf-embed{position:relative;display:flex;flex:1 1 auto;width:100%;height:100%;min-height:520px;overflow:hidden}
 .dpf-embed .dpf-panel{width:100%;height:100%;border:0;border-radius:0;box-shadow:none;background:var(--dsw-alias-bg-primary,#141416)}
 
-.dpf-panel{width:min(1180px,100%);height:min(860px,100%);display:flex;flex-direction:column;background:var(--dsw-alias-bg-elevated,#1c1c1e);color:var(--dsw-alias-text-primary,#eee);border:1px solid var(--dsw-alias-border-default,#ffffff18);border-radius:16px;box-shadow:0 26px 96px #000a;overflow:hidden;font-size:13px;line-height:1.55;color-scheme:dark}
+.dpf-panel{container-type:inline-size;width:min(1180px,100%);height:min(860px,100%);display:flex;flex-direction:column;background:var(--dsw-alias-bg-elevated,#1c1c1e);color:var(--dsw-alias-text-primary,#eee);border:1px solid var(--dsw-alias-border-default,#ffffff18);border-radius:16px;box-shadow:0 26px 96px #000a;overflow:hidden;font-size:13px;line-height:1.55;color-scheme:dark}
 .dpf-panel *{box-sizing:border-box}
 .dpf-head{display:flex;align-items:center;gap:12px;padding:18px 20px 15px;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff12);flex-wrap:wrap}
 .dpf-head>svg{width:24px;height:24px;flex:none;color:var(--dsw-alias-interactive-primary,#c9b6ff)}
@@ -560,7 +562,7 @@ window.__ModuleLoader__.load({
 .dpf-icon{width:32px;height:32px;border:0;border-radius:8px;background:transparent;color:inherit;cursor:pointer;font-size:19px;line-height:1}
 .dpf-icon:hover{background:var(--dsw-alias-bg-hover,#ffffff10)}
 .dpf-icon:disabled{opacity:.4;cursor:default}
-.dpf-body{flex:1;min-height:0;display:grid;grid-template-columns:392px minmax(0,1fr)}
+.dpf-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,392px) minmax(0,1fr)}
 .dpf-shell{flex:1;min-height:0;display:flex}
 .dpf-rail{width:214px;flex:none;display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--dsw-alias-border-default,#ffffff12);background:#ffffff05}
 .dpf-rail-brand{display:flex;align-items:center;gap:9px;padding:15px 14px 12px}
@@ -591,7 +593,7 @@ window.__ModuleLoader__.load({
 .dpf-topbar{display:flex;align-items:center;gap:12px;padding:11px 18px;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff12);flex-wrap:wrap}
 .dpf-topbar-title{font-weight:700;font-size:14.5px;letter-spacing:.02em}
 .dpf-topbar-note{font-size:11.5px;color:var(--dsw-alias-text-secondary,#7d7d84);max-width:46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.dpf-body-image{grid-template-columns:minmax(0,1fr) minmax(300px,.92fr)}
+.dpf-body-image{grid-template-columns:minmax(0,1fr) minmax(0,300px)}
 .dpf-image-tabs{display:flex;gap:6px;margin-bottom:14px}
 .dpf-image-tab{appearance:none;border:1px solid transparent;background:#ffffff0a;color:var(--dsw-alias-text-secondary,#9a9aa2);font:inherit;font-size:12.5px;padding:7px 16px;border-radius:999px;cursor:pointer;text-align:center}
 .dpf-image-tab:hover{color:var(--dsw-alias-text-primary,#dededf);background:#ffffff12}
@@ -619,8 +621,8 @@ window.__ModuleLoader__.load({
 .dpf-icon-btn:hover{background:#ffffff10}
 .dpf-select{-webkit-appearance:none;appearance:none;background-image:linear-gradient(45deg,transparent 50%,#888 50%),linear-gradient(135deg,#888 50%,transparent 50%);background-position:calc(100% - 15px) 50%,calc(100% - 10px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:28px}
 .dpf-select option{background:#222;color:#eee}
-.dpf-grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.dpf-grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.dpf-grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:8px}
+.dpf-grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr));gap:8px}
 .dpf-gallery{margin-top:12px;padding:10px;border:1px dashed var(--dsw-alias-border-default,#ffffff1c);border-radius:10px;background:var(--dsw-alias-bg-secondary,#ffffff05)}
 .dpf-gallery-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
 .dpf-gallery-count{font-size:11px;color:var(--dsw-alias-text-secondary,#8b8b90);font-variant-numeric:tabular-nums}
@@ -787,14 +789,14 @@ window.__ModuleLoader__.load({
 .dpf-minimap-node{position:absolute;background:#ffffff3d;border-radius:1px}
 .dpf-minimap-node[data-kind="text"]{background:#e0b25c4d}
 .dpf-minimap-box{position:absolute;border:1px solid var(--dsw-alias-brand-primary,#5a8dff);background:#5a8dff1f;border-radius:2px}
-@media(max-width:960px){.dpf-backdrop{padding:0}.dpf-panel{height:100%;border-radius:0}.dpf-body{grid-template-columns:1fr;overflow:auto}.dpf-left{border-right:0;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff10);overflow:visible}.dpf-right{overflow:visible}.dpf-picker{width:100%}.dpf-body-image{grid-template-columns:1fr}.dpf-shell{flex-direction:column}.dpf-rail{width:100%;border-right:0;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff12)}.dpf-rail-tabs{flex-direction:row}.dpf-rail-tab{flex:1}.dpf-rail-list{max-height:150px}.dpf-image-main{border-right:0;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff10)}}
+@container (max-width:780px){.dpf-body{grid-template-columns:minmax(0,1fr);overflow:auto}.dpf-left{border-right:0;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff10);overflow:visible}.dpf-right{overflow:visible}.dpf-body-image{grid-template-columns:minmax(0,1fr)}.dpf-image-main{border-right:0;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff10)}.dpf-topbar-note{max-width:100%;flex-basis:100%}.dpf-picker{width:100%}}@media(max-width:960px){.dpf-backdrop{padding:0}.dpf-panel{height:100%;border-radius:0}.dpf-body{grid-template-columns:1fr;overflow:auto}.dpf-left{border-right:0;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff10);overflow:visible}.dpf-right{overflow:visible}.dpf-picker{width:100%}.dpf-body-image{grid-template-columns:1fr}.dpf-shell{flex-direction:column}.dpf-rail{width:100%;border-right:0;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff12)}.dpf-rail-tabs{flex-direction:row}.dpf-rail-tab{flex:1}.dpf-rail-list{max-height:150px}.dpf-image-main{border-right:0;border-bottom:1px solid var(--dsw-alias-border-default,#ffffff10)}}
 .dpf-canvas-foot{position:absolute;right:10px;bottom:10px;font-size:11px;color:#ffffff66;z-index:3;font-variant-numeric:tabular-nums}
-.dpf-canvas-gal{position:absolute;left:10px;bottom:34px;width:392px;max-height:min(62%,calc(100% - 110px));overflow:auto;z-index:7;padding:10px;border-radius:12px;background:#1b1b20f5;border:1px solid #ffffff26;box-shadow:0 18px 48px #000000a6;backdrop-filter:blur(8px)}
+.dpf-canvas-gal{position:absolute;left:10px;bottom:34px;width:min(392px,calc(100% - 20px));max-height:min(62%,calc(100% - 110px));overflow:auto;z-index:7;padding:10px;border-radius:12px;background:#1b1b20f5;border:1px solid #ffffff26;box-shadow:0 18px 48px #000000a6;backdrop-filter:blur(8px)}
 .dpf-canvas-gal-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .dpf-canvas-gal-head b{font-size:12px;color:#ffffffdd}
 .dpf-canvas-gal .dpf-canvas-x{position:static;margin-left:auto}
 .dpf-canvas-gal .dpf-gallery-grid{max-height:none}
-.dpf-canvas-gal-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:8px}
+.dpf-canvas-gal-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px;margin-top:8px}
 .dpf-canvas-gal-grid .dpf-gallery-card{padding:3px}
 .dpf-canvas-gal-grid .dpf-gallery-card img{height:70px;object-fit:contain}
 .dpf-canvas-gal-grid .dpf-gallery-name{font-size:10px;line-height:1.2;max-height:2.4em;overflow:hidden}
@@ -960,20 +962,22 @@ window.__ModuleLoader__.load({
          * 按 x 坐标排会在图摆得歪一点时就跟肉眼对不上。
          * 用最长路径当层级，同层再按坐标兜底，环也能收敛。
          */
-        function chainOrder(nodes, edges) {
-          const ids = new Set(nodes.map((node) => node.id));
+        function chainOrder(nodes, edges, graphNodes = nodes) {
+          const selected = Array.isArray(nodes) ? nodes : [];
+          const graph = Array.isArray(graphNodes) && graphNodes.length > 0 ? graphNodes : selected;
+          const ids = new Set(graph.map((node) => node && node.id).filter(Boolean));
           const next = new Map();
-          const indeg = new Map(nodes.map((node) => [node.id, 0]));
+          const indeg = new Map(graph.map((node) => [node.id, 0]));
           for (const edge of Array.isArray(edges) ? edges : []) {
             if (!ids.has(edge.from) || !ids.has(edge.to) || edge.from === edge.to) continue;
             if (!next.has(edge.from)) next.set(edge.from, []);
             next.get(edge.from).push(edge.to);
             indeg.set(edge.to, (indeg.get(edge.to) || 0) + 1);
           }
-          const depth = new Map(nodes.map((node) => [node.id, 0]));
-          let frontier = nodes.filter((node) => (indeg.get(node.id) || 0) === 0).map((node) => node.id);
+          const depth = new Map(graph.map((node) => [node.id, 0]));
+          let frontier = graph.filter((node) => (indeg.get(node.id) || 0) === 0).map((node) => node.id);
           const seen = new Set(frontier);
-          for (let round = 0; round < nodes.length && frontier.length > 0; round += 1) {
+          for (let round = 0; round < graph.length && frontier.length > 0; round += 1) {
             const ahead = [];
             for (const id of frontier) {
               for (const to of next.get(id) || []) {
@@ -986,7 +990,7 @@ window.__ModuleLoader__.load({
             }
             frontier = ahead;
           }
-          return nodes.slice().sort((left, right) => (depth.get(left.id) || 0) - (depth.get(right.id) || 0)
+          return selected.slice().sort((left, right) => (depth.get(left.id) || 0) - (depth.get(right.id) || 0)
             || left.x - right.x
             || left.y - right.y);
         }
@@ -1238,14 +1242,153 @@ window.__ModuleLoader__.load({
         function writeStore(patch) {
           try {
             localStorage.setItem(STORE_KEY, JSON.stringify({ ...readStore(), ...patch }));
-          } catch {
-            /* storage is best-effort */
+            return true;
+          } catch (failure) {
+            console.warn('[drawcraft] localStorage write failed', failure);
+            return false;
           }
         }
 
         // 画布状态：节点、血缘边、视口。图多了会撞 localStorage 配额，
         // 所以超限时退一步——先把图丢掉只留骨架，再不行就整个不存。
         const EMPTY_CANVAS = { nodes: [], edges: [], view: { x: 0, y: 0, scale: 1 } };
+
+        // 画布导入/读取共用的严格数据边界：避免坏坐标、重复 ID、伪图片和悬空边
+        // 进入渲染层。旧版本里只检查了 id，导致删节点后遗留的边不断积累。
+        const CANVAS_IMPORT_MAX_BYTES = 16 * 1024 * 1024;
+        const CANVAS_COORD_LIMIT = 10000000;
+        const CANVAS_TEXT_LIMIT = 200000;
+        const CANVAS_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+        const CANVAS_IMAGE_RE = /^data:image\/(?:png|jpe?g|webp|gif|avif);base64,[A-Za-z0-9+/=\s]+$/i;
+
+        function canvasFinite(value, limit = CANVAS_COORD_LIMIT) {
+          return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= limit;
+        }
+
+        function canvasValidId(value) {
+          return typeof value === 'string' && CANVAS_ID_RE.test(value);
+        }
+
+        function canvasValidImage(value) {
+          return value === '' || (typeof value === 'string' && CANVAS_IMAGE_RE.test(value));
+        }
+
+        function pruneCanvasEdges(nodes, edges) {
+          const ids = new Set((Array.isArray(nodes) ? nodes : []).map((node) => node && node.id).filter(canvasValidId));
+          const seen = new Set();
+          return (Array.isArray(edges) ? edges : []).filter((edge) => {
+            if (!edge || !canvasValidId(edge.id) || !canvasValidId(edge.from) || !canvasValidId(edge.to)) return false;
+            if (edge.from === edge.to || !ids.has(edge.from) || !ids.has(edge.to)) return false;
+            const pair = `${edge.from}\u0000${edge.to}`;
+            if (seen.has(pair)) return false;
+            seen.add(pair);
+            return true;
+          });
+        }
+
+        function normalizeCanvasMeta(meta) {
+          if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return undefined;
+          const out = {};
+          const text = (value, max) => typeof value === 'string' ? value.slice(0, max) : '';
+          for (const key of ['prompt', 'primary', 'model', 'size', 'quality', 'mode', 'orderNote', 'refNote', 'opaqueNote', 'fixNote']) {
+            const value = text(meta[key], key === 'prompt' ? CANVAS_TEXT_LIMIT : 2000);
+            if (value) out[key] = value;
+          }
+          if (typeof meta.withImage === 'boolean') out.withImage = meta.withImage;
+          if (typeof meta.poseCarded === 'boolean') out.poseCarded = meta.poseCarded;
+          if (Array.isArray(meta.extras)) out.extras = meta.extras.filter((value) => typeof value === 'string').slice(0, 4).map((value) => value.slice(0, 120));
+          if (Array.isArray(meta.sources)) out.sources = meta.sources.filter(canvasValidId).slice(0, 60);
+          if (Array.isArray(meta.referenceSources)) {
+            out.referenceSources = meta.referenceSources.slice(0, 4).map((item) => ({
+              id: canvasValidId(item?.id) ? item.id : '',
+              title: text(item?.title, 120),
+              src: canvasValidImage(item?.src) && String(item.src).length <= CANVAS_IMPORT_MAX_BYTES ? item.src : '',
+            })).filter((item) => item.id || item.src);
+          }
+          return Object.keys(out).length ? out : undefined;
+        }
+
+        function normalizeCanvasState(value, limit = 60) {
+          const source = value && typeof value === 'object' ? value : {};
+          const rawNodes = Array.isArray(source.nodes) ? source.nodes : [];
+          const nodes = [];
+          const ids = new Set();
+          for (const node of rawNodes.slice(-limit)) {
+            if (!node || !canvasValidId(node.id) || ids.has(node.id)) continue;
+            const kind = node.kind === 'text' ? 'text' : node.kind === 'image' ? 'image' : '';
+            if (!kind) continue;
+            const x = Number(node.x);
+            const y = Number(node.y);
+            const w = Number(node.w);
+            const h = Number(node.h);
+            if (![x, y, w, h].every((item) => canvasFinite(item)) || w <= 0 || h <= 0 || w > 4000 || h > 4000) continue;
+            const safeW = Math.min(4000, Math.max(120, w));
+            const safeH = Math.min(4000, Math.max(74, h));
+            const src = typeof node.src === 'string' ? node.src : '';
+            const text = typeof node.text === 'string' ? node.text : '';
+            if (!canvasValidImage(src) || text.length > CANVAS_TEXT_LIMIT) continue;
+            if (kind === 'text' && src) continue;
+            ids.add(node.id);
+            const meta = normalizeCanvasMeta(node.meta);
+            nodes.push({
+              id: node.id,
+              kind,
+              x,
+              y,
+              w: safeW,
+              h: safeH,
+              src,
+              text,
+              title: typeof node.title === 'string' ? node.title.slice(0, 500) : '',
+              note: typeof node.note === 'string' ? node.note.slice(0, 1000) : '',
+              ...(node.lost ? { lost: true } : {}),
+              ...(node.subject ? { subject: true } : {}),
+              ...(meta ? { meta } : {}),
+            });
+          }
+          const view = source.view && typeof source.view === 'object' ? source.view : {};
+          const vx = Number(view.x);
+          const vy = Number(view.y);
+          const scale = Number(view.scale);
+          return {
+            nodes,
+            edges: pruneCanvasEdges(nodes, source.edges),
+            view: {
+              x: canvasFinite(vx) ? vx : 0,
+              y: canvasFinite(vy) ? vy : 0,
+              scale: Number.isFinite(scale) ? Math.min(2.5, Math.max(0.2, scale)) : 1,
+            },
+          };
+        }
+
+        function validateCanvasPayload(value, limit = 60) {
+          if (!value || typeof value !== 'object' || !Array.isArray(value.nodes) || value.nodes.length > limit) return null;
+          const ids = new Set();
+          for (const node of value.nodes) {
+            if (!node || !canvasValidId(node.id) || ids.has(node.id)) return null;
+            if (node.kind !== 'text' && node.kind !== 'image') return null;
+            if (![node.x, node.y, node.w, node.h].every((item) => canvasFinite(Number(item))) || Number(node.w) <= 0 || Number(node.h) <= 0 || Number(node.w) > 4000 || Number(node.h) > 4000) return null;
+            if (typeof node.src !== 'string' || typeof node.text !== 'string' || node.text.length > CANVAS_TEXT_LIMIT || !canvasValidImage(node.src)) return null;
+            if (node.kind === 'text' && node.src) return null;
+            ids.add(node.id);
+          }
+          if (!Array.isArray(value.edges) || value.edges.length > limit * 2) return null;
+          const edgeIds = new Set();
+          for (const edge of value.edges) {
+            if (!edge || !canvasValidId(edge.id) || edgeIds.has(edge.id) || !canvasValidId(edge.from) || !canvasValidId(edge.to) || edge.from === edge.to || !ids.has(edge.from) || !ids.has(edge.to)) return null;
+            edgeIds.add(edge.id);
+          }
+          const view = value.view;
+          if (!view || !canvasFinite(Number(view.x)) || !canvasFinite(Number(view.y)) || !Number.isFinite(Number(view.scale)) || Number(view.scale) < 0.2 || Number(view.scale) > 2.5) return null;
+          return normalizeCanvasState(value, limit);
+        }
+
+        function mergeCanvasText(nodes, edges, graphNodes = nodes) {
+          return chainOrder((Array.isArray(nodes) ? nodes : []).filter((node) => node && node.kind === 'text' && String(node.text || '').trim()), edges, graphNodes)
+            .map((node) => String(node.text || '').trim())
+            .filter(Boolean)
+            .join('\\n');
+        }
 
         // 撤销栈是纯数据结构，抽成函数方便单测。push 会清掉 future（新分支），
         // 超过 CANVAS_HISTORY 就丢最老的一步（否则整张画布的 base64 会把内存吃满）。
@@ -1280,26 +1423,18 @@ window.__ModuleLoader__.load({
             if (!raw) raw = localStorage.getItem(LEGACY_CANVAS_KEY);
             const value = raw ? JSON.parse(raw) : null;
             if (!value || typeof value !== 'object') return { ...EMPTY_CANVAS };
-            const view = value.view && typeof value.view === 'object' ? value.view : EMPTY_CANVAS.view;
-            return {
-              nodes: Array.isArray(value.nodes) ? value.nodes.filter((node) => node && typeof node.id === 'string') : [],
-              edges: Array.isArray(value.edges) ? value.edges.filter((edge) => edge && edge.from && edge.to) : [],
-              view: {
-                x: Number(view.x) || 0,
-                y: Number(view.y) || 0,
-                scale: Math.min(CANVAS_MAX_SCALE, Math.max(CANVAS_MIN_SCALE, Number(view.scale) || 1)),
-              },
-            };
+            return normalizeCanvasState(value, CANVAS_LIMIT);
           } catch {
             return { ...EMPTY_CANVAS };
           }
         }
 
         function writeCanvas(state) {
+          const normalized = normalizeCanvasState(state, CANVAS_LIMIT);
           const payload = {
-            nodes: (state.nodes || []).slice(-CANVAS_LIMIT),
-            edges: state.edges || [],
-            view: state.view || EMPTY_CANVAS.view,
+            nodes: normalized.nodes,
+            edges: normalized.edges,
+            view: normalized.view,
           };
           try {
             localStorage.setItem(CANVAS_KEY, JSON.stringify(payload));
@@ -1309,7 +1444,7 @@ window.__ModuleLoader__.load({
             try {
               const slim = {
                 ...payload,
-                nodes: payload.nodes.map((node) => ({ ...node, src: '', lost: Boolean(node.src) })),
+                nodes: payload.nodes.map((node) => ({ ...node, src: '', lost: Boolean(node.src), ...(node.meta ? { meta: { ...node.meta, referenceSources: [] } } : {}) })),
               };
               localStorage.setItem(CANVAS_KEY, JSON.stringify(slim));
               return 'quota';
@@ -1470,7 +1605,10 @@ window.__ModuleLoader__.load({
 
           // 自带的生图端点：用户自己填地址、密钥、模型名，插件服务端转发。
           const [targets, setTargets] = useState([]);
-          const [source, setSource] = useState('host');
+          const [source, setSource] = useState(() => {
+            const saved = typeof stored.source === 'string' ? stored.source : 'host';
+            return saved === 'host' && typeof stored.imageChannelId === 'string' && stored.imageChannelId ? `host:${stored.imageChannelId}` : saved;
+          });
           const [targetOpen, setTargetOpen] = useState(false);
           const [targetDraft, setTargetDraft] = useState({ label: '', baseUrl: '', apiKey: '', models: '' });
           const [targetBusy, setTargetBusy] = useState(false);
@@ -1500,6 +1638,21 @@ window.__ModuleLoader__.load({
 
           const mounted = useRef(true);
           const runIdRef = useRef('');
+          const optimizeRunRef = useRef('');
+          const describeRunRef = useRef('');
+          const patchRunRef = useRef('');
+          const optimizeAbortRef = useRef(null);
+          const describeAbortRef = useRef(null);
+          const patchAbortRef = useRef(null);
+          const galleryRunRef = useRef(0);
+          const canvasGalleryRunRef = useRef(0);
+          const galleryAbortRef = useRef(null);
+          const canvasGalleryAbortRef = useRef(null);
+          const refKindsRunRef = useRef(0);
+          const canvasKindsRunRef = useRef(0);
+          const refKindsAbortRef = useRef(null);
+          const canvasKindsAbortRef = useRef(null);
+          const lightboxRestoreRef = useRef(null);
           const ideaRef = useRef(null);
           useEffect(() => {
             mounted.current = true;
@@ -1523,6 +1676,24 @@ window.__ModuleLoader__.load({
             setLightbox(null);
             setZoom({ scale: 1, x: 0, y: 0 });
           };
+          useEffect(() => {
+            if (!lightbox) return undefined;
+            const previous = document.activeElement;
+            lightboxRestoreRef.current = previous;
+            const focus = () => lightboxRef.current?.querySelector('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])')?.focus?.();
+            const onKey = (event) => {
+              if (event.key === 'Escape') { event.preventDefault(); closeLightbox(); return; }
+              if (event.key !== 'Tab') return;
+              const buttons = Array.from(lightboxRef.current?.querySelectorAll('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])') || []);
+              if (!buttons.length) return;
+              const first = buttons[0]; const last = buttons[buttons.length - 1];
+              if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+              else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+            };
+            focus(); document.addEventListener('keydown', onKey);
+            return () => { document.removeEventListener('keydown', onKey); if (lightboxRestoreRef.current?.focus) lightboxRestoreRef.current.focus(); lightboxRestoreRef.current = null; };
+          }, [lightbox]);
+
           const zoomBy = (factor) => {
             setZoom((prev) => {
               const scale = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, prev.scale * factor));
@@ -1634,8 +1805,8 @@ window.__ModuleLoader__.load({
           }, []);
 
           useEffect(() => {
-            writeStore({ provider, model, dialect, style, aspect, language, mode, candidates, idea, purpose, mustInclude, mustAvoid, styleHint, refs });
-          }, [provider, model, dialect, style, aspect, language, mode, candidates, idea, purpose, mustInclude, mustAvoid, styleHint, refs]);
+            writeStore({ provider, model, dialect, style, aspect, language, mode, candidates, idea, purpose, mustInclude, mustAvoid, styleHint, refs, source: source === 'host' && imageChannelId ? `host:${imageChannelId}` : source, imageSize, imageQuality, imageChannelId, imageModel });
+          }, [provider, model, dialect, style, aspect, language, mode, candidates, idea, purpose, mustInclude, mustAvoid, styleHint, refs, source, imageChannelId, imageModel, imageSize, imageQuality]);
 
           const modelOptions = useMemo(() => {
             const flat = [];
@@ -1650,27 +1821,21 @@ window.__ModuleLoader__.load({
           const REF_PAGE = 24;
           // 工坊和画布各有一套参考库 state，查法完全一样，只把结果交给调用方去落。
           const fetchGallery = useCallback(
-            async (query, lib, filters, append) => {
+            async (query, lib, filters, append, signal) => {
               const at = append ? (Array.isArray(append) ? append.length : 0) : 0;
               try {
                 const payload = await post('gallery', {
-                  action: 'search',
-                  query: query || '',
-                  lib,
-                  limit: REF_PAGE,
-                  offset: at,
+                  action: 'search', query: query || '', lib, limit: REF_PAGE, offset: at,
                   filters: filters && Object.keys(filters).length > 0 ? filters : undefined,
-                });
-                if (payload && payload.ok === false) {
-                  return { ok: false, message: payload.message || t('galleryEmpty'), works: [], total: 0 };
-                }
+                }, signal);
+                if (payload && payload.ok === false) return { ok: false, message: payload.message || t('galleryEmpty'), works: [], total: 0 };
                 const works = Array.isArray(payload?.works) ? payload.works : [];
                 return { ok: true, message: '', works, total: Number(payload?.total) || works.length };
               } catch (failure) {
+                if (failure?.name === 'AbortError') return { ok: false, aborted: true, message: '', works: [], total: 0 };
                 return { ok: false, message: explain(failure), works: [], total: 0 };
               }
-            },
-            [t],
+            }, [t],
           );
 
           const mergeWorks = (previous, batch, append) => {
@@ -1681,55 +1846,60 @@ window.__ModuleLoader__.load({
 
           const searchRefs = useCallback(
             async (query, lib, filters, append) => {
+              const token = ++galleryRunRef.current;
+              galleryAbortRef.current?.abort?.();
+              const controller = new AbortController();
+              galleryAbortRef.current = controller;
               if (!append) setRefWorks([]);
-              setRefLoading(true);
-              setRefError('');
-              const result = await fetchGallery(query, lib, filters, append);
-              if (!result.ok) {
-                setRefError(result.message);
-                if (!append) setRefWorks([]);
-                setRefTotal(0);
-              } else {
-                setRefWorks((previous) => mergeWorks(previous, result.works, append));
-                setRefTotal(result.total);
+              setRefLoading(true); setRefError('');
+              const result = await fetchGallery(query, lib, filters, append, controller.signal);
+              if (token !== galleryRunRef.current) return;
+              if (!result.ok && !result.aborted) {
+                setRefError(result.message); if (!append) setRefWorks([]); setRefTotal(0);
+              } else if (result.ok) {
+                setRefWorks((previous) => mergeWorks(previous, result.works, append)); setRefTotal(result.total);
               }
               setRefLoading(false);
-            },
-            [fetchGallery],
+            }, [fetchGallery],
           );
 
-          // 画布里的参考库：同一套检索，结果落到画布自己那一组 state，
-          // 这样面板开着也不会把工坊里已经搜好的列表顶掉。
           const searchCanvasGallery = useCallback(
             async (query, lib, filters, append) => {
+              const token = ++canvasGalleryRunRef.current;
+              canvasGalleryAbortRef.current?.abort?.();
+              const controller = new AbortController();
+              canvasGalleryAbortRef.current = controller;
               if (!append) setCanvasGalWorks([]);
-              setCanvasGalLoading(true);
-              setCanvasGalError('');
-              const result = await fetchGallery(query, lib, filters, append);
-              if (!result.ok) {
-                setCanvasGalError(result.message);
-                if (!append) setCanvasGalWorks([]);
-                setCanvasGalTotal(0);
-              } else {
-                setCanvasGalWorks((previous) => mergeWorks(previous, result.works, append));
-                setCanvasGalTotal(result.total);
+              setCanvasGalLoading(true); setCanvasGalError('');
+              const result = await fetchGallery(query, lib, filters, append, controller.signal);
+              if (token !== canvasGalleryRunRef.current) return;
+              if (!result.ok && !result.aborted) {
+                setCanvasGalError(result.message); if (!append) setCanvasGalWorks([]); setCanvasGalTotal(0);
+              } else if (result.ok) {
+                setCanvasGalWorks((previous) => mergeWorks(previous, result.works, append)); setCanvasGalTotal(result.total);
               }
               setCanvasGalLoading(false);
-            },
-            [fetchGallery],
+            }, [fetchGallery],
           );
 
           // 拉某个库的种类清单（体系/角度/分类 之类）。服务端有内存缓存，切回来也不重复读盘。
           const loadKinds = useCallback(async (lib) => {
             if (!lib || lib === 'auto') return;
+            const token = ++refKindsRunRef.current;
+            refKindsAbortRef.current?.abort?.();
+            const controller = new AbortController();
+            refKindsAbortRef.current = controller;
             try {
-              const payload = await post('gallery', { action: 'kinds', lib });
+              const payload = await post('gallery', { action: 'kinds', lib }, controller.signal);
+              if (token !== refKindsRunRef.current || controller.signal.aborted) return;
               if (payload?.kinds?.[lib]) {
                 const dims = payload.kinds[lib];
                 setRefKinds((previous) => ({ ...previous, [lib]: dims }));
               }
-            } catch {
-              // 种类拉不到不影响搜索，静默降级
+            } catch (failure) {
+              if (failure?.name !== 'AbortError' && token === refKindsRunRef.current) {
+                // 种类拉不到不影响搜索，静默降级
+              }
             }
           }, []);
 
@@ -1761,13 +1931,20 @@ window.__ModuleLoader__.load({
 
           const loadCanvasKinds = useCallback(async (lib) => {
             if (!lib || lib === 'auto') return;
+            const token = ++canvasKindsRunRef.current;
+            canvasKindsAbortRef.current?.abort?.();
+            const controller = new AbortController();
+            canvasKindsAbortRef.current = controller;
             try {
-              const payload = await post('gallery', { action: 'kinds', lib });
+              const payload = await post('gallery', { action: 'kinds', lib }, controller.signal);
+              if (token !== canvasKindsRunRef.current || controller.signal.aborted) return;
               if (payload?.kinds?.[lib]) {
                 setCanvasGalKinds((previous) => ({ ...previous, [lib]: payload.kinds[lib] }));
               }
-            } catch {
-              // 拉不到种类不影响搜索
+            } catch (failure) {
+              if (failure?.name !== 'AbortError' && token === canvasKindsRunRef.current) {
+                // 拉不到种类不影响搜索
+              }
             }
           }, []);
 
@@ -1934,29 +2111,34 @@ window.__ModuleLoader__.load({
             ),
             refLib !== 'auto' && !refKinds[refLib] && h('div', { className: 'dpf-gallery-note' }, `${t('galleryKinds')}…`),
             kindsBox,
-            refError && h('div', { className: 'dpf-gallery-note dpf-warn' }, refError),
+            refError && h('div', { className: 'dpf-gallery-note dpf-warn', role: 'alert', 'aria-live': 'assertive' }, refError),
             refWorks.length > 0 &&
               h(
                 'div',
                 { className: 'dpf-gallery-grid' },
                 refWorks.map((work) =>
                   h(
-                    'button',
+                    'div',
                     {
                       key: `${work.lib}:${work.id}`,
-                      type: 'button',
                       className: 'dpf-gallery-card',
+                      role: 'button',
+                      tabIndex: 0,
                       'data-on': refs.some((item) => item.lib === work.lib && item.id === work.id) ? '1' : undefined,
                       title: `${work.name}\n${(work.tags || []).join('・')}`,
                       onClick: () => toggleRef(work),
+                      onKeyDown: (event) => {
+                        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggleRef(work); }
+                      },
                     },
                     h('img', { src: work.thumbUrl, alt: '', loading: 'lazy' }),
                     h('span', { className: 'dpf-gallery-name' }, work.name),
                     h(
-                      'span',
+                      'button',
                       {
                         className: 'dpf-gallery-canvas',
-                        role: 'button',
+                        type: 'button',
+                        'aria-label': t('canvasPick'),
                         title: t('canvasPick'),
                         onClick: (event) => {
                           event.stopPropagation();
@@ -2022,6 +2204,10 @@ window.__ModuleLoader__.load({
             setRunning(true);
             const runId = globalThis.crypto?.randomUUID?.() || `run-${Date.now()}-${Math.random().toString(16).slice(2)}`;
             runIdRef.current = runId;
+            optimizeRunRef.current = runId;
+            optimizeAbortRef.current?.abort?.();
+            const controller = new AbortController();
+            optimizeAbortRef.current = controller;
             try {
               const payload = await post('optimize', {
                 runId,
@@ -2040,8 +2226,8 @@ window.__ModuleLoader__.load({
                 styleHint,
                 refs: refs.map((item) => ({ lib: item.lib, id: item.id })),
                 remember: true,
-              });
-              if (!mounted.current || runIdRef.current !== runId) return;
+              }, controller.signal);
+              if (!mounted.current || optimizeRunRef.current !== runId) return;
               setResult(payload);
               setEditedPrompt(payload.prompt || '');
               setTab('breakdown');
@@ -2062,6 +2248,18 @@ window.__ModuleLoader__.load({
                 model: payload.model || '',
                 idea: payload.idea || '',
                 elapsedMs: payload.elapsedMs || 0,
+                provider: payload.provider || provider,
+                language: payload.language || language,
+                mode: payload.mode || mode,
+                styleHint,
+                purpose,
+                mustInclude,
+                mustAvoid,
+                source,
+                imageSize,
+                imageQuality,
+                imageChannelId,
+                imageModel,
               };
               setHistory((previous) => {
                 const next = [entry, ...previous].slice(0, HISTORY_LIMIT);
@@ -2069,20 +2267,21 @@ window.__ModuleLoader__.load({
                 return next;
               });
             } catch (failure) {
-              if (!mounted.current || runIdRef.current !== runId) return;
+              if (!mounted.current || optimizeRunRef.current !== runId) return;
+              if (failure?.name === 'AbortError') return;
               setError(explain(failure));
             } finally {
-              if (mounted.current && runIdRef.current === runId) {
-                setRunning(false);
-                runIdRef.current = '';
+              if (mounted.current && optimizeRunRef.current === runId) {
+                setRunning(false); optimizeRunRef.current = ''; runIdRef.current = '';
               }
             }
           }, [running, idea, modelReady, provider, model, dialect, style, aspect, language, mode, candidates, purpose, mustInclude, mustAvoid, styleHint, refs, t]);
 
           const stop = useCallback(() => {
-            const runId = runIdRef.current;
+            const runId = optimizeRunRef.current;
             if (!runId) return;
-            runIdRef.current = '';
+            optimizeAbortRef.current?.abort?.();
+            optimizeRunRef.current = ''; runIdRef.current = '';
             void post('stop', { runId }).catch(() => undefined);
             setRunning(false);
             setNotice(t('stopDone'));
@@ -2112,16 +2311,30 @@ window.__ModuleLoader__.load({
               dialect: payload.dialect,
               style: payload.style,
               aspect: payload.params?.aspect_ratio || '',
-              model: payload.model || '',
-              idea: payload.idea || '',
+              model: payload.model || model,
+              idea: payload.idea || idea,
               elapsedMs: payload.elapsedMs || 0,
+              provider: payload.provider || provider,
+              language: payload.language || language,
+              mode: payload.mode || mode,
+              candidates,
+              styleHint,
+              purpose,
+              mustInclude,
+              mustAvoid,
+              refs: refs.map((item) => ({ ...item })),
+              source,
+              imageSize,
+              imageQuality,
+              imageChannelId,
+              imageModel,
             };
             setHistory((previous) => {
               const next = [entry, ...previous].slice(0, HISTORY_LIMIT);
               writeStore({ history: next });
               return next;
             });
-          }, [t]);
+          }, [aspect, candidates, dialect, imageChannelId, imageModel, imageQuality, imageSize, idea, language, mode, model, mustAvoid, mustInclude, provider, refs, styleHint, purpose, source, t]);
 
           const newRunId = () => globalThis.crypto?.randomUUID?.() || `run-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -2151,7 +2364,10 @@ window.__ModuleLoader__.load({
               setNotice('');
               setDescribing(true);
               const runId = newRunId();
-              runIdRef.current = runId;
+              describeAbortRef.current?.abort?.();
+              const controller = new AbortController();
+              describeAbortRef.current = controller;
+              describeRunRef.current = runId;
               try {
                 const data = await readImageFile(file);
                 const shot = { data, name: file.name || 'reference.png' };
@@ -2168,8 +2384,8 @@ window.__ModuleLoader__.load({
                   language,
                   idea: idea.trim(),
                   image: { data, mediaType, name: file.name || '' },
-                });
-                if (!mounted.current || runIdRef.current !== runId) return;
+                }, controller.signal);
+                if (!mounted.current || describeRunRef.current !== runId) return;
                 setResult(payload);
                 setEditedPrompt(payload.prompt || '');
                 setTab('breakdown');
@@ -2178,12 +2394,12 @@ window.__ModuleLoader__.load({
                 remember(payload);
                 setNotice(t('describeDone'));
               } catch (failure) {
-                if (!mounted.current || runIdRef.current !== runId) return;
+                if (!mounted.current || describeRunRef.current !== runId) return;
+                if (failure?.name === 'AbortError') return;
                 setError(explain(failure));
               } finally {
-                if (mounted.current && runIdRef.current === runId) {
-                  setDescribing(false);
-                  runIdRef.current = '';
+                if (mounted.current && describeRunRef.current === runId) {
+                  setDescribing(false); describeRunRef.current = ''; runIdRef.current = '';
                 }
               }
             },
@@ -2199,6 +2415,11 @@ window.__ModuleLoader__.load({
            * 生图后端只接受一张 image + 最多四张 images，所以这里先按这个上限收。
            */
           const imageRef = useRef(null);
+          const clearPrimaryImage = useCallback(() => {
+            imageRef.current = null;
+            setImage(null);
+            if (fileRef.current) fileRef.current.value = '';
+          }, []);
           const loadShot = useCallback(async (file, forceExtra) => {
             if (!file || !String(file.type || '').startsWith('image/')) return;
             let data = '';
@@ -2226,15 +2447,16 @@ window.__ModuleLoader__.load({
           // 面板打开时，直接 Ctrl+V 就能把剪贴板里的图塞进来——这是最顺手的一条路。
           // 画布页要另一套处理：图应该落到画布上，而不是跑进图生图的主图槽。
           const pageRef = useRef(page);
+          const isEditableTarget = (target) => {
+            const element = target && target.nodeType === 1 ? target : target?.parentElement;
+            return Boolean(element && (element.closest?.('textarea,input,[contenteditable="true"],[contenteditable=""]') || element.isContentEditable));
+          };
           pageRef.current = page;
           const canvasPasteRef = useRef(null);
           useEffect(() => {
             const onPaste = (event) => {
               const items = event.clipboardData?.items;
-              if (!items) return;
-              // 光标在输入框里（画布文本节点、提示词框）就让人家正常粘字，不抢。
-              const tag = event.target && event.target.tagName;
-              const typing = tag === 'TEXTAREA' || tag === 'INPUT';
+              if (!items || isEditableTarget(event.target)) return;
               for (const item of items) {
                 if (item.kind !== 'file' || !String(item.type || '').startsWith('image/')) continue;
                 const file = item.getAsFile();
@@ -2258,7 +2480,7 @@ window.__ModuleLoader__.load({
                 }
                 // 没图也没链接：按 Ctrl+V 复制节点那条路走。
                 // 但正在输入框里打字时不抢，否则正常粘文本也会被吃掉。
-                if (!typing) canvasPasteRef.current(null);
+                canvasPasteRef.current(null);
               }
             };
             window.addEventListener('paste', onPaste);
@@ -2285,6 +2507,10 @@ window.__ModuleLoader__.load({
             setNotice('');
             setPatching(true);
             const runId = newRunId();
+            patchAbortRef.current?.abort?.();
+            const controller = new AbortController();
+            patchAbortRef.current = controller;
+            patchRunRef.current = runId;
             runIdRef.current = runId;
             const base = editedPrompt || result.prompt || '';
             try {
@@ -2299,8 +2525,8 @@ window.__ModuleLoader__.load({
                 dialect: result.dialect || dialect,
                 aspect: result.params?.aspect_ratio || aspect,
                 language: result.language || language,
-              });
-              if (!mounted.current || runIdRef.current !== runId) return;
+              }, controller.signal);
+              if (!mounted.current || patchRunRef.current !== runId) return;
               setResult(payload);
               setEditedPrompt(payload.prompt || '');
               setPatchText('');
@@ -2308,12 +2534,12 @@ window.__ModuleLoader__.load({
               setPreviewError('');
               remember(payload);
             } catch (failure) {
-              if (!mounted.current || runIdRef.current !== runId) return;
+              if (!mounted.current || patchRunRef.current !== runId) return;
+              if (failure?.name === 'AbortError') return;
               setError(explain(failure));
             } finally {
-              if (mounted.current && runIdRef.current === runId) {
-                setPatching(false);
-                runIdRef.current = '';
+              if (mounted.current && patchRunRef.current === runId) {
+                setPatching(false); patchRunRef.current = ''; runIdRef.current = '';
               }
             }
           }, [result, patching, patchText, modelReady, provider, model, editedPrompt, dialect, aspect, language, t, remember]);
@@ -2345,7 +2571,10 @@ window.__ModuleLoader__.load({
                   .filter((channel) => channel.id !== '' && channel.models.length > 0);
                 if (!alive || normalized.length === 0) return;
                 const saved = readStore();
-                const channel = normalized.find((item) => item.id === saved.imageChannelId) ?? normalized[0];
+                const savedChannelId = typeof saved.imageChannelId === 'string' && saved.imageChannelId
+                  ? saved.imageChannelId
+                  : String(saved.source || '').startsWith('host:') ? String(saved.source).slice(5) : '';
+                const channel = normalized.find((item) => item.id === savedChannelId) ?? normalized[0];
                 const wanted = typeof saved.imageModel === 'string' ? saved.imageModel : '';
                 setImageChannels(normalized);
                 setImageChannelId(channel.id);
@@ -2367,7 +2596,12 @@ window.__ModuleLoader__.load({
               body: JSON.stringify(payload),
             });
             const body = await response.json().catch(() => null);
-            if (body && Array.isArray(body.targets)) setTargets(body.targets);
+            if (!response.ok || !body?.ok) {
+              const error = new Error(body?.message || `HTTP ${response.status}`);
+              error.code = body?.code || 'target-request-failed';
+              throw error;
+            }
+            if (Array.isArray(body.targets)) setTargets(body.targets);
             return body;
           };
 
@@ -2397,7 +2631,11 @@ window.__ModuleLoader__.load({
             setTargetBusy(true);
             setTargetMsg('');
             try {
-              const draft = { ...targetDraft, label: targetDraft.label.trim() || targetDraft.baseUrl.trim() };
+              const draft = {
+                ...targetDraft,
+                label: targetDraft.label.trim() || targetDraft.baseUrl.trim(),
+                models: targetDraft.models.split(/[,，;；\s]+/).map((item) => item.trim()).filter(Boolean),
+              };
               const body = await callTargets({ action: 'save', target: draft });
               if (!body?.ok) {
                 setTargetBad(true);
@@ -2466,13 +2704,24 @@ window.__ModuleLoader__.load({
 
           const activeChannel = imageChannels.find((item) => item.id === imageChannelId) ?? imageChannels[0] ?? null;
           const imageModelOptions = activeChannel ? activeChannel.models : [];
-          const activeTarget = targets.find((item) => item.id === source) ?? null;
+          const activeTarget = source.startsWith('host:') ? null : targets.find((item) => item.id === source) ?? null;
           // 「来源」= 真正拿去请求的那个端点：宿主的每个渠道，加用户自己加的目标。
           const sourceOptions = [
             ...imageChannels.map((item) => ({ id: `host:${item.id}`, label: `${t('sourceHost')} · ${item.name}`, models: item.models })),
             ...targets.map((item) => ({ id: item.id, label: item.label, models: item.models })),
           ];
-          const currentSource = activeTarget ? activeTarget.id : activeChannel ? `host:${activeChannel.id}` : '';
+          const currentSource = activeTarget ? activeTarget.id : source.startsWith('host:') && imageChannels.some((item) => `host:${item.id}` === source) ? source : activeChannel ? `host:${activeChannel.id}` : '';
+          useEffect(() => {
+            if (targets.length === 0 && imageChannels.length === 0) return;
+            const targetOk = source && !source.startsWith('host:') && targets.some((item) => item.id === source);
+            const hostOk = source.startsWith('host:') && imageChannels.some((item) => `host:${item.id}` === source);
+            const fallback = targetOk || hostOk ? source : imageChannels[0] ? `host:${imageChannels[0].id}` : targets[0]?.id || 'host';
+            if (fallback !== source) setSource(fallback);
+            if (fallback.startsWith('host:')) {
+              const id = fallback.slice(5);
+              if (id !== imageChannelId) setImageChannelId(id);
+            }
+          }, [imageChannels, imageChannelId, source, targets]);
           const imageModelChoices = activeTarget ? activeTarget.models : imageModelOptions;
           const effectiveImageModel = imageModelChoices.includes(imageModel) ? imageModel : imageModelChoices[0] ?? '';
 
@@ -2668,7 +2917,7 @@ window.__ModuleLoader__.load({
           // 一次生图请求。工坊的 renderOne 里那段逻辑原本是内联的，
           // 画布也要用同一套通道，所以抽成独立入口，renderOne 保持原样不动。
           const requestImage = useCallback(
-            async ({ prompt, primary = '', extras = [], size = '', quality = '', retry = true }) => {
+            async ({ prompt, primary = '', extras = [], size = '', quality = '', model = '', retry = true }) => {
               const subject = primary || '';
               const shared = {
                 mode: subject ? 'edit' : 'text',
@@ -2678,7 +2927,7 @@ window.__ModuleLoader__.load({
                 n: 1,
                 ...(subject ? { image: subject } : {}),
                 ...(extras.length > 0 ? { images: extras.slice(0, 4) } : {}),
-                ...(effectiveImageModel ? { model: effectiveImageModel } : {}),
+                ...((model || effectiveImageModel) ? { model: model || effectiveImageModel } : {}),
               };
               const endpoint = activeTarget ? `${API}/render` : GENERATE_API;
               const payload = activeTarget
@@ -3106,7 +3355,10 @@ window.__ModuleLoader__.load({
 
           const canvasImport = useCallback(
             async (file) => {
-              if (!file) return;
+              if (!file || Number(file.size) > CANVAS_IMPORT_MAX_BYTES) {
+                setCanvasMsg({ text: t('canvasImportBad'), bad: true });
+                return;
+              }
               let parsed = null;
               try {
                 parsed = JSON.parse(await file.text());
@@ -3114,34 +3366,11 @@ window.__ModuleLoader__.load({
                 setCanvasMsg({ text: t('canvasImportBad'), bad: true });
                 return;
               }
-              if (!parsed || !Array.isArray(parsed.nodes)) {
+              const next = validateCanvasPayload(parsed, CANVAS_LIMIT);
+              if (!next || !window.confirm(t('canvasImportAsk'))) {
                 setCanvasMsg({ text: t('canvasImportBad'), bad: true });
                 return;
               }
-              if (!window.confirm(t('canvasImportAsk'))) return;
-              const next = {
-                nodes: parsed.nodes
-                  .filter((node) => node && typeof node.id === 'string')
-                  .slice(-CANVAS_LIMIT)
-                  .map((node) => ({
-                    id: String(node.id),
-                    kind: node.kind === 'text' ? 'text' : 'image',
-                    x: Number(node.x) || 0,
-                    y: Number(node.y) || 0,
-                    w: Math.max(120, Number(node.w) || 240),
-                    h: Math.max(80, Number(node.h) || 240),
-                    src: typeof node.src === 'string' ? node.src : '',
-                    text: typeof node.text === 'string' ? node.text : '',
-                    title: typeof node.title === 'string' ? node.title : '',
-                    note: typeof node.note === 'string' ? node.note : '',
-                    lost: Boolean(node.lost),
-                    meta: node.meta && typeof node.meta === 'object' ? node.meta : undefined,
-                  })),
-                edges: Array.isArray(parsed.edges)
-                  ? parsed.edges.filter((edge) => edge && edge.from && edge.to).map((edge) => ({ id: String(edge.id || canvasNodeId()), from: String(edge.from), to: String(edge.to) }))
-                  : [],
-                view: { x: 0, y: 0, scale: 1 },
-              };
               commitCanvas(() => next);
               setCanvasSel([]);
               setCanvasMsg({ text: t('canvasImportDone'), bad: false });
@@ -3153,13 +3382,17 @@ window.__ModuleLoader__.load({
             async (file, extra = {}) => {
               if (!file || !String(file.type || '').startsWith('image/')) return;
               // readImageFile 直接返回 data URL 字符串（不是 {data,name} 那种对象），别当成对象取 .data。
-              const data = await readImageFile(file, CANVAS_MAX_EDGE);
-              if (!data) {
-                setCanvasMsg({ text: t('canvasBadImage'), bad: true });
-                return;
+              try {
+                const data = await readImageFile(file, CANVAS_MAX_EDGE);
+                if (!data) {
+                  setCanvasMsg({ text: t('canvasBadImage'), bad: true });
+                  return;
+                }
+                const name = file.name && file.name !== 'blob' ? file.name : t('canvasImage');
+                addCanvasNode('image', { src: data, title: name, note: extra.note || '' });
+              } catch (failure) {
+                setCanvasMsg({ text: failure?.message || t('canvasBadImage'), bad: true });
               }
-              const name = file.name && file.name !== 'blob' ? file.name : t('canvasImage');
-              addCanvasNode('image', { src: data, title: name, note: extra.note || '' });
             },
             [addCanvasNode, t],
           );
@@ -3202,15 +3435,15 @@ window.__ModuleLoader__.load({
               setCanvasMsg({ text: t('canvasPickFirst'), bad: true });
               return;
             }
-            const textNode = picked.find((node) => node.kind === 'text' && String(node.text || '').trim());
+            const textNodes = picked.filter((node) => node.kind === 'text' && String(node.text || '').trim());
             const images = picked.filter((node) => node.src);
-            const words = String(textNode?.text || '').trim();
+            const words = mergeCanvasText(textNodes, state.edges, state.nodes);
             // 画布上的「图一/图二/图三」按连线数：上游是图一，跟着线往下走。
             // 发送顺序却是主体优先，先把编号定下来，提示词才对得上。
-            const ordered = chainOrder(images, state.edges);
+            const ordered = chainOrder(images, state.edges, state.nodes);
             const slotOf = new Map(ordered.map((node, at) => [node.id, at + 1]));
             // 主图不能按节点顺序随便取：白模/深度图排在前面时会被当主体，
-            // 出来就是 3D 素模或动漫脸。按「像不像真人照片」打分，最像的当主图。
+            // 出来就是 3D 素模或动漫脸。现在按连线顺序确定主体，避免用图像外观猜测。
             let primary = '';
             let primaryNode = null;
             let extras = [];
@@ -3251,18 +3484,21 @@ window.__ModuleLoader__.load({
               primary = await poseCardDataUrl(primary);
               poseCarded = true;
             }
-            const prompt = primary
-              ? `${EDIT_PREFIX[language] || EDIT_PREFIX.en}${orderNote(
+            const orderText = primary
+              ? orderNote(
                   ordered.map((node) => ({
                     slot: slotOf.get(node.id),
                     title: String(node.title || '').slice(0, 18) || t('canvasImage'),
                   })),
                   slotOf.get(primaryNode.id) || 1,
                   language,
-                )}${CANVAS_REAL_NOTE[language] || CANVAS_REAL_NOTE.en}${
-                  poseCarded ? CANVAS_FIX_NOTE[language] || CANVAS_FIX_NOTE.en : ''
-                }${refNote}${opaqueNote}${words || t('canvasFollowImage')}`
-              : `${CANVAS_REAL_NOTE[language] || CANVAS_REAL_NOTE.en}${words}`;
+                )
+              : '';
+            const fixNote = poseCarded ? CANVAS_FIX_NOTE[language] || CANVAS_FIX_NOTE.en : '';
+            const realNote = CANVAS_REAL_NOTE[language] || CANVAS_REAL_NOTE.en;
+            const prompt = primary
+              ? `${EDIT_PREFIX[language] || EDIT_PREFIX.en}${orderText}${realNote}${fixNote}${refNote}${opaqueNote}${words || t('canvasFollowImage')}`
+              : `${realNote}${words}`;
             setCanvasBusy('pending');
             setCanvasMsg({ text: t('canvasWorking'), bad: false });
             try {
@@ -3292,6 +3528,11 @@ window.__ModuleLoader__.load({
                   prompt: words,
                   withImage: Boolean(primary),
                   mode: primary ? 'edit' : 'text',
+                  orderNote: orderText,
+                  refNote,
+                  opaqueNote,
+                  fixNote,
+                  poseCarded,
                   // 出图画歪时，第一个要问的就是「到底谁被当成主体了」。
                   // 以前只有 ids，看不出哪张是主图，这次把标题也存下来。
                   primary: primaryNode ? String(primaryNode.title || '').slice(0, 24) : '',
@@ -3300,6 +3541,7 @@ window.__ModuleLoader__.load({
                   size: imageSize || '',
                   quality: imageQuality || '',
                   sources: picked.map((item) => item.id),
+                  referenceSources: extrasNodes.map((item) => ({ id: item.id, title: String(item.title || '').slice(0, 120), src: item.src })),
                 },
               };
               commitCanvas((prev) => ({
@@ -3365,21 +3607,37 @@ window.__ModuleLoader__.load({
             async (node) => {
               if (!node || !node.meta || canvasBusy) return;
               const meta = node.meta;
-              const primary = node.src || '';
+              const primary = meta.withImage ? node.src || '' : '';
               const words = String(meta.prompt || '').trim();
+              const state = canvasState.current;
+              const savedRefs = Array.isArray(meta.referenceSources) ? meta.referenceSources : [];
+              const sourceIds = Array.isArray(meta.sources) ? meta.sources.filter((id) => id !== node.id && canvasValidId(id)) : [];
+              const primarySource = sourceIds.map((id) => state.nodes.find((item) => item.id === id)).find((item) => item?.title && item.title === meta.primary);
+              const fallbackRefs = sourceIds.map((id) => state.nodes.find((item) => item.id === id))
+                .filter((item) => item?.src && item.id !== primarySource?.id)
+                .map((item) => ({ id: item.id, title: item.title, src: item.src }));
+              const sourceRefs = savedRefs.length > 0 ? savedRefs : fallbackRefs;
+              const extras = sourceRefs.map((item) => (typeof item?.src === 'string' && canvasValidImage(item.src) ? item.src : '')).filter(Boolean).slice(0, 4);
+              const refsMissing = sourceRefs.length > extras.length;
               if (!primary && !words) return;
+              const orderText = typeof meta.orderNote === 'string' ? meta.orderNote : '';
+              const refNote = typeof meta.refNote === 'string' ? meta.refNote : '';
+              const opaqueNote = typeof meta.opaqueNote === 'string' ? meta.opaqueNote : '';
+              const fixNote = typeof meta.fixNote === 'string' ? meta.fixNote : '';
+              const realNote = CANVAS_REAL_NOTE[language] || CANVAS_REAL_NOTE.en;
               const prompt = primary
-                ? `${EDIT_PREFIX[language] || EDIT_PREFIX.en}${CANVAS_REAL_NOTE[language] || CANVAS_REAL_NOTE.en}${words || t('canvasFollowImage')}`
-                : `${CANVAS_REAL_NOTE[language] || CANVAS_REAL_NOTE.en}${words}`;
+                ? `${EDIT_PREFIX[language] || EDIT_PREFIX.en}${orderText}${realNote}${fixNote}${refNote}${opaqueNote}${words || t('canvasFollowImage')}`
+                : `${realNote}${words}`;
               setCanvasBusy(node.id);
               setCanvasMsg({ text: t('canvasWorking'), bad: false });
               try {
                 const shots = await requestImage({
                   prompt,
                   primary,
-                  extras: [],
+                  extras,
                   size: meta.size || '',
                   quality: meta.quality || '',
+                  model: meta.model || '',
                 });
                 const shot = shots[0];
                 const id = canvasNodeId();
@@ -3394,7 +3652,7 @@ window.__ModuleLoader__.load({
                   src: `data:${shot.mime};base64,${shot.b64}`,
                   text: '',
                   note: `${new Date().toLocaleTimeString()} · ${meta.model || 'auto'}`,
-                  meta: { ...meta, sources: [node.id] },
+                  meta: { ...meta, sources: Array.isArray(meta.sources) ? [...meta.sources, node.id].slice(-60) : [node.id] },
                 };
                 commitCanvas((prev) => ({
                   nodes: [...prev.nodes, fresh].slice(-CANVAS_LIMIT),
@@ -3402,7 +3660,7 @@ window.__ModuleLoader__.load({
                   view: prev.view,
                 }));
                 setCanvasSel([id]);
-                setCanvasMsg({ text: t('canvasDone'), bad: false });
+                setCanvasMsg({ text: refsMissing ? t('canvasRefsMissing') : t('canvasDone'), bad: refsMissing });
               } catch (failure) {
                 const message = failure?.message || String(failure);
                 const rejected = failure?.code === 'upstream-rejected';
@@ -3441,14 +3699,27 @@ window.__ModuleLoader__.load({
                 elapsedMs: entry.elapsedMs,
                 idea: entry.idea,
                 createdAt: entry.at,
+                provider: entry.provider,
+                language: entry.language,
+                mode: entry.mode,
               });
+              setProvider(entry.provider || provider);
+              setLanguage(entry.language || language);
+              setMode(entry.mode || mode);
+              setStyleHint(entry.styleHint || ''); setPurpose(entry.purpose || ''); setMustInclude(entry.mustInclude || ''); setMustAvoid(entry.mustAvoid || '');
+              setSource(entry.source || 'host'); setImageSize(entry.imageSize || 'auto'); setImageQuality(entry.imageQuality || 'auto');
+              setDialect(entry.dialect || 'natural-en'); setStyle(entry.style || 'auto'); setAspect(entry.aspect || 'auto');
+              setModel(entry.model || ''); setCandidates(Number(entry.candidates) || 1);
+              setImageChannelId(entry.imageChannelId || ''); setImageModel(entry.imageModel || '');
+              setRefs(Array.isArray(entry.refs) ? entry.refs : []);
+              setPage('prompt');
               setEditedPrompt(entry.prompt || '');
               setTab('breakdown');
               setError('');
               setPreview([]);
               setPreviewError('');
             },
-            [],
+            [provider, language, mode],
           );
 
           const reuse = useCallback(() => {
@@ -3470,8 +3741,7 @@ window.__ModuleLoader__.load({
               return;
             }
             if (page === 'image') {
-              setImage(null);
-              if (imageRef.current) imageRef.current.value = '';
+              clearPrimaryImage();
               setRefShots([]);
               setRefs([]);
               setPreview([]);
@@ -3489,7 +3759,7 @@ window.__ModuleLoader__.load({
             setPatchText('');
             setPreview([]);
             setPreviewError('');
-          }, [page, canvas.nodes.length, commitCanvas, t]);
+          }, [page, canvas.nodes.length, commitCanvas, clearPrimaryImage, t]);
 
           const railRows = useMemo(() => {
             const key = railQuery.trim().toLowerCase();
@@ -3950,7 +4220,7 @@ window.__ModuleLoader__.load({
               generating ? t('generating') : t('regenerate'),
             ),
           ),
-          previewError ? h('div', { className: 'dpf-error' }, previewError) : null,
+          previewError ? h('div', { className: 'dpf-error', role: 'alert', 'aria-live': 'assertive' }, previewError) : null,
           generating && preview.length === 0 ? h('div', { className: 'dpf-preview-empty' }, t('generating')) : null,
           previewStale && preview.length > 0
             ? h('div', { className: 'dpf-stale' }, t('staleTag'))
@@ -4040,7 +4310,7 @@ window.__ModuleLoader__.load({
                     h('div', { className: 'dpf-thumb-title' }, image.name || t('imageReady')),
                     h('div', { className: 'dpf-thumb-sub' }, describing ? t('describing') : t('describeDone')),
                   ),
-                  h('button', { className: 'dpf-btn dpf-btn-ghost dpf-btn-small', type: 'button', onClick: () => setImage(null) }, t('clear')),
+                  h('button', { className: 'dpf-btn dpf-btn-ghost dpf-btn-small', type: 'button', onClick: clearPrimaryImage }, t('clear')),
                 )
               : h(
                   'div',
@@ -4166,24 +4436,27 @@ window.__ModuleLoader__.load({
               h(
                 'div',
                 null,
-                h('label', { className: 'dpf-label' }, t('imageSource')),
+                h('label', { className: 'dpf-label', htmlFor: 'dpf-image-source' }, t('imageSource')),
                 h(
                   'div',
                   { style: { display: 'flex', gap: 6, alignItems: 'center' } },
                   h(
                     'select',
                     {
+                      id: 'dpf-image-source',
                       className: 'dpf-select',
                       value: currentSource,
                       disabled: sourceOptions.length === 0,
                       onChange: (event) => {
                         const raw = event.target.value;
                         if (raw.startsWith('host:')) {
-                          setSource('host');
+                          setSource(raw);
                           pickImageChannel(raw.slice(5));
+                          writeStore({ source: `host:${raw.slice(5)}` });
                           return;
                         }
                         setSource(raw);
+                        writeStore({ source: raw });
                         setImageModel((targets.find((item) => item.id === raw) || {}).models?.[0] || '');
                       },
                     },
@@ -4209,10 +4482,11 @@ window.__ModuleLoader__.load({
               h(
                 'div',
                 null,
-                h('label', { className: 'dpf-label' }, t('imageModel')),
+                h('label', { className: 'dpf-label', htmlFor: 'dpf-image-model' }, t('imageModel')),
                 h(
                   'select',
                   {
+                    id: 'dpf-image-model',
                     className: 'dpf-select',
                     value: effectiveImageModel,
                     disabled: imageModelChoices.length === 0,
@@ -4294,7 +4568,7 @@ window.__ModuleLoader__.load({
                     ),
                 ),
                 targetMsg &&
-                  h('div', { className: `dpf-target-msg${targetBad ? ' is-bad' : ''}` }, targetMsg),
+                  h('div', { className: `dpf-target-msg${targetBad ? ' is-bad' : ''}`, role: targetBad ? 'alert' : 'status', 'aria-live': targetBad ? 'assertive' : 'polite' }, targetMsg),
                 h('div', { className: 'dpf-target-msg' }, t('targetHint')),
               ),
             imageModelChoices.length > 0 &&
@@ -4335,7 +4609,7 @@ window.__ModuleLoader__.load({
                 ),
               ),
               ),
-              (error || notice) && h('div', { className: `dpf-error${notice ? ' dpf-warn' : ''}`, style: { marginBottom: 10 } }, error || notice),
+              (error || notice) && h('div', { className: `dpf-error${notice ? ' dpf-warn' : ''}`, style: { marginBottom: 10 }, 'aria-live': 'polite' }, error || notice),
               h(
                 'div',
                 { className: 'dpf-actions' },
@@ -4435,13 +4709,6 @@ window.__ModuleLoader__.load({
                 event.preventDefault();
                 const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
                 if (file) void canvasLoadFile(file);
-              },
-              onPaste: (event) => {
-                const items = Array.from((event.clipboardData && event.clipboardData.items) || []);
-                const hit = items.find((item) => item.kind === 'file' && String(item.type).startsWith('image/'));
-                if (!hit) return;
-                event.preventDefault();
-                void canvasLoadFile(hit.getAsFile());
               },
               onKeyDown: (event) => {
                 // 光标在画布文本节点或任何输入框里时，Delete/Backspace 是删字，不是删节点。
@@ -4704,27 +4971,32 @@ window.__ModuleLoader__.load({
                     ),
                   ),
                   canvasKindsBox,
-                  canvasGalError && h('div', { className: 'dpf-gallery-note dpf-warn' }, canvasGalError),
+                  canvasGalError && h('div', { className: 'dpf-gallery-note dpf-warn', role: 'alert', 'aria-live': 'assertive' }, canvasGalError),
                   h(
                     'div',
                     { className: 'dpf-canvas-gal-grid' },
                     canvasGalWorks.map((work) =>
                       h(
-                        'button',
+                        'div',
                         {
                           key: `${work.lib}:${work.id}`,
-                          type: 'button',
                           className: 'dpf-gallery-card',
+                          role: 'button',
+                          tabIndex: 0,
                           title: `${work.name} · ${(work.tags || []).join('・')}`,
                           onClick: () => void refToCanvas(work),
+                          onKeyDown: (event) => {
+                            if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void refToCanvas(work); }
+                          },
                         },
                         h('img', { src: work.thumbUrl, alt: '', loading: 'lazy' }),
                         h('span', { className: 'dpf-gallery-name' }, work.name),
                         h(
-                          'span',
+                          'button',
                           {
                             className: 'dpf-gallery-canvas',
-                            role: 'button',
+                            type: 'button',
+                            'aria-label': t('canvasApplyNode'),
                             title: t('canvasApplyNode'),
                             onClick: (event) => {
                               event.stopPropagation();
@@ -4867,7 +5139,7 @@ window.__ModuleLoader__.load({
                 },
               }),
             ),
-            canvasMsg.text ? h('div', { className: 'dpf-canvas-msg', 'data-bad': canvasMsg.bad ? '1' : undefined }, canvasMsg.text) : null,
+            canvasMsg.text ? h('div', { className: 'dpf-canvas-msg', 'data-bad': canvasMsg.bad ? '1' : undefined, role: canvasMsg.bad ? 'alert' : 'status', 'aria-live': canvasMsg.bad ? 'assertive' : 'polite' }, canvasMsg.text) : null,
             h(
               'div',
               { className: 'dpf-canvas-foot' },
@@ -5188,7 +5460,7 @@ window.__ModuleLoader__.load({
                         ),
                       ),
                   ),
-                  (error || notice) && h('div', { className: `dpf-error${notice ? ' dpf-warn' : ''}`, style: { marginBottom: 10 } }, error || notice),
+                  (error || notice) && h('div', { className: `dpf-error${notice ? ' dpf-warn' : ''}`, style: { marginBottom: 10 }, 'aria-live': 'polite' }, error || notice),
                   h(
                     'div',
                     { className: 'dpf-actions' },
@@ -5205,7 +5477,7 @@ window.__ModuleLoader__.load({
                       `${t('pageImage')} →`,
                     ),
                   ),
-                  !modelReady && !catalogLoading && h('div', { className: 'dpf-error dpf-warn', style: { marginTop: 10 } }, catalogError || t('needModel')),
+                  !modelReady && !catalogLoading && h('div', { className: 'dpf-error dpf-warn', style: { marginTop: 10 }, 'aria-live': 'polite' }, catalogError || t('needModel')),
                 ),
                 h(
                   'div',

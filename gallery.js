@@ -53,6 +53,14 @@ export const GALLERY_LIBS = {
 };
 
 const memory = new Map();
+const searchMemory = new Map();
+const INDEX_FETCH_TIMEOUT_MS = 30_000;
+
+function cacheRows(lib, rows) {
+  memory.set(lib, rows);
+  searchMemory.set(lib, rows.map((row) => JSON.stringify(row).toLocaleLowerCase()));
+  return rows;
+}
 
 function fileOf(lib) {
   const spec = GALLERY_LIBS[lib];
@@ -71,7 +79,7 @@ export async function loadIndex(lib, { refresh = false } = {}) {
     try {
       const rows = JSON.parse(await readFile(path, 'utf8'));
       if (Array.isArray(rows) && rows.length > 0) {
-        memory.set(lib, rows);
+        cacheRows(lib, rows);
         return rows;
       }
     } catch {
@@ -81,7 +89,7 @@ export async function loadIndex(lib, { refresh = false } = {}) {
 
   let rows;
   try {
-    const response = await fetch(`${UPSTREAM}/${spec.file}`);
+    const response = await fetch(`${UPSTREAM}/${spec.file}`, { signal: AbortSignal.timeout(INDEX_FETCH_TIMEOUT_MS) });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     rows = await response.json();
   } catch (error) {
@@ -94,7 +102,7 @@ export async function loadIndex(lib, { refresh = false } = {}) {
 
   await mkdir(CACHE_DIR, { recursive: true });
   await writeFile(path, JSON.stringify(rows), 'utf8').catch(() => undefined);
-  memory.set(lib, rows);
+  cacheRows(lib, rows);
   return rows;
 }
 
@@ -259,11 +267,15 @@ export async function searchGallery({ query, lib = 'auto', limit = 8, filters = 
     };
   }
   const hits = [];
+  const foldedKeywords = keywords.map((kw) => kw.toLocaleLowerCase());
   for (const name of libs) {
-    for (const row of await loadIndex(name)) {
+    const rows = await loadIndex(name);
+    const blobs = searchMemory.get(name) || rows.map((row) => blobOf(row).toLocaleLowerCase());
+    if (!searchMemory.has(name)) searchMemory.set(name, blobs);
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
       if (!matchFilters(row, filters)) continue;
-      const blob = blobOf(row);
-      if (keywords.every((kw) => blob.includes(kw))) hits.push({ row, name });
+      if (foldedKeywords.every((kw) => blobs[index].includes(kw))) hits.push({ row, name });
     }
   }
   return {

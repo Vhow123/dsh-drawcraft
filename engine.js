@@ -235,7 +235,7 @@ export function findMode(key) {
 export function stripMidjourneyParams(prompt) {
   return String(prompt ?? '')
     .replace(
-      /\s--(?:aspect|ar|version|v|stylize|style|chaos|quality|q|seed|weird|tile|niji|no|s|c)\b(?:\s+[^\s-][^\s]*)?/gi,
+      /\s--no\b(?:\s+(?!--)[^\s]+)*|\s--(?:aspect|ar|version|v|stylize|style|chaos|quality|q|seed|weird|tile|niji|s|c)\b(?:\s+[^\s-][^\s]*)?/gi,
       '',
     )
     .replace(/\s{2,}/g, ' ')

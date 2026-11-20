@@ -78,6 +78,13 @@ test('stripMidjourneyParams hands parameter ownership to the host', () => {
   assert.equal(stripMidjourneyParams('a lighthouse at dusk --ar 3:2 --v 6 --style raw'), 'a lighthouse at dusk');
 });
 
+test('stripMidjourneyParams consumes a complete --no list until the next parameter', () => {
+  assert.equal(
+    stripMidjourneyParams('a portrait --no blurry, extra limbs, watermark --ar 3:4 --style raw'),
+    'a portrait',
+  );
+});
+
 test('stitch builds a usable prompt without the model', () => {
   const fields = { subject: 'a brass diving helmet', lighting: 'single hard key light' };
   assert.equal(stitch(fields, { dialect: 'stable-diffusion' }), 'a brass diving helmet, single hard key light');

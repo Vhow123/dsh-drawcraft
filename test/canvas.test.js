@@ -40,11 +40,22 @@ const pieces = [
   extractConst(source, 'CANVAS_MIN_SCALE'),
   extractConst(source, 'CANVAS_MAX_SCALE'),
   extractConst(source, 'CANVAS_HISTORY'),
+  extractConst(source, 'CANVAS_IMPORT_MAX_BYTES'),
+  extractConst(source, 'CANVAS_COORD_LIMIT'),
+  extractConst(source, 'CANVAS_TEXT_LIMIT'),
+  "const CANVAS_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;",
+  "const CANVAS_IMAGE_RE = /^data:image\\/(?:png|jpe?g|webp|gif|avif);base64,[A-Za-z0-9+/=\\s]+$/i;",
   extractConst(source, 'EMPTY_CANVAS'),
   extractFunction(source, 'histPush'),
   extractFunction(source, 'histUndo'),
   extractFunction(source, 'histRedo'),
   extractFunction(source, 'readCanvas'),
+  extractFunction(source, 'canvasFinite'),
+  extractFunction(source, 'canvasValidId'),
+  extractFunction(source, 'canvasValidImage'),
+  extractFunction(source, 'pruneCanvasEdges'),
+  extractFunction(source, 'normalizeCanvasMeta'),
+  extractFunction(source, 'normalizeCanvasState'),
   extractFunction(source, 'writeCanvas'),
   extractFunction(source, 'chainOrder'),
 ].join('\n');
@@ -76,10 +87,11 @@ test('写完能原样读回', () => {
   const store = makeStore();
   const api = load(store);
   const node = { id: 'cn_1', kind: 'image', x: 10, y: 20, w: 200, h: 200, src: 'data:image/png;base64,AAA', title: '图' };
-  const warn = api.writeCanvas({ nodes: [node], edges: [{ id: 'e1', from: 'cn_1', to: 'cn_2' }], view: { x: 5, y: 6, scale: 1.5 } });
+  const node2 = { id: 'cn_2', kind: 'text', x: 260, y: 20, w: 200, h: 100, src: '', text: '说明' };
+  const warn = api.writeCanvas({ nodes: [node, node2], edges: [{ id: 'e1', from: 'cn_1', to: 'cn_2' }], view: { x: 5, y: 6, scale: 1.5 } });
   assert.equal(warn, '');
   const back = api.readCanvas();
-  assert.equal(back.nodes.length, 1);
+  assert.equal(back.nodes.length, 2);
   assert.equal(back.nodes[0].src, node.src);
   assert.equal(back.edges[0].from, 'cn_1');
   assert.deepEqual(back.view, { x: 5, y: 6, scale: 1.5 });
@@ -193,6 +205,25 @@ test('附图编号跟着连线走，不跟坐标走', () => {
     { from: 'b', to: 'c' },
   ];
   assert.deepEqual(chainOrder(nodes, edges).map((node) => node.id), ['a', 'b', 'c']);
+});
+
+test('跨文字节点的图链仍按完整拓扑排序', () => {
+  const load = new Function(`${pieces}\nreturn { chainOrder };`);
+  const { chainOrder } = load();
+  const images = [
+    { id: 'photo', x: 900, y: 0 },
+    { id: 'pose', x: 100, y: 0 },
+  ];
+  const graphNodes = [
+    images[0],
+    { id: 'caption', kind: 'text', x: 500, y: 0 },
+    images[1],
+  ];
+  const edges = [
+    { from: 'photo', to: 'caption' },
+    { from: 'caption', to: 'pose' },
+  ];
+  assert.deepEqual(chainOrder(images, edges, graphNodes).map((node) => node.id), ['photo', 'pose']);
 });
 
 test('没连线的图退回按坐标排', () => {

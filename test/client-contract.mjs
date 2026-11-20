@@ -216,7 +216,7 @@ check('节点可拖动与缩放', clientSource.includes('canvasStartDrag') && cl
 check('空白处拖动平移', clientSource.includes('canvasPanStart') && clientSource.includes('canvasPan.current'), 'canvas-pan');
 check('选中节点再出图', clientSource.includes('canvasGenerate') && clientSource.includes('canvasSel.includes(node.id)'), 'canvas-generate');
 check('出图结果带血缘线', clientSource.includes('canvasEdgePath') && clientSource.includes('edges: ['), 'canvas-edges');
-check('画布支持粘贴与拖入', clientSource.includes("event.clipboardData && event.clipboardData.items") && clientSource.includes('void canvasLoadFile(file)'), 'canvas-paste');
+check('画布支持粘贴与拖入', (clientSource.includes('clipboardData?.items') || clientSource.includes('event.clipboardData && event.clipboardData.items')) && clientSource.includes('void canvasLoadFile(file)'), 'canvas-paste');
 check('进画布的图会压缩', clientSource.includes('CANVAS_MAX_EDGE') && clientSource.includes('readImageFile(file, CANVAS_MAX_EDGE)'), 'canvas-compress');
 check('节点能送回工坊', clientSource.includes('canvasSendToWorkshop'), 'canvas-to-workshop');
 check('图库缩略图能直接加到画布', clientSource.includes('refToCanvas') && clientSource.includes('dpf-gallery-canvas'), 'canvas-from-gallery');
@@ -239,7 +239,7 @@ check('支持全选', clientSource.includes('const canvasSelectAll = useCallback
 check('支持导出与导入画布', clientSource.includes('const canvasExport = useCallback') && clientSource.includes('const canvasImport = useCallback') && clientSource.includes('canvasImportFile'), 'canvas-io');
 check('节点记录生成参数', clientSource.includes('meta: {') && clientSource.includes('withImage: Boolean(primary)'), 'canvas-meta');
 check('可按节点记录再出一张', clientSource.includes('const canvasRetryNode = useCallback') && clientSource.includes("'↻'"), 'canvas-retry');
-check('双击空白复位视图', clientSource.includes('onDoubleClick') && clientSource.includes('canvasZoomTo(1)'), 'canvas-dblclick');
+check('双击空白复位视图', clientSource.includes('onDoubleClick') && (clientSource.includes('canvasZoomTo(1)') || clientSource.includes('view: { x: 0, y: 0, scale: 1 }')), 'canvas-dblclick');
 check('快捷键提示挂到工具栏', clientSource.includes('(Ctrl+Z)') && clientSource.includes('(Ctrl+Shift+Z)'), 'canvas-keys');
 
 // 画布粘贴：Ctrl+V 直接落图，且不跟图生图的主图槽抢
@@ -296,7 +296,7 @@ check(
 );
 check(
   '画布出图默认补写实约束',
-  clientSource.includes('CANVAS_REAL_NOTE') && clientSource.includes('CANVAS_REAL_NOTE[language] || CANVAS_REAL_NOTE.en}${words'),
+  clientSource.includes('CANVAS_REAL_NOTE') && clientSource.includes('CANVAS_REAL_NOTE[language] || CANVAS_REAL_NOTE.en') && clientSource.includes('${words'),
   'canvas-real-note',
 );
 check(
@@ -313,8 +313,8 @@ check(
 );
 check(
   '附图编号按连线顺序而不是坐标',
-  clientSource.includes('function chainOrder(nodes, edges)') &&
-    clientSource.includes('const ordered = chainOrder(images, state.edges)') &&
+  /function chainOrder\(nodes, edges(?:, graphNodes = nodes)?\)/.test(clientSource) &&
+    /const ordered = chainOrder\(images, state\.edges(?:, state\.nodes)?\)/.test(clientSource) &&
     !clientSource.includes('images.slice().sort((left, right) => left.x - right.x'),
   'canvas-chain-order',
 );

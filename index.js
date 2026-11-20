@@ -16,7 +16,10 @@
 import { appendFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import {
   buildDescribeUserPrompt,
   CATALOG,
@@ -294,6 +297,27 @@ function configPath() {
   return join(homedir(), '.dsh', 'drawcraft.json');
 }
 
+const fileWriteQueues = new Map();
+
+function enqueueFileWrite(path, task) {
+  const previous = fileWriteQueues.get(path) || Promise.resolve();
+  const current = previous.catch(() => undefined).then(task);
+  fileWriteQueues.set(path, current);
+  return current.finally(() => {
+    if (fileWriteQueues.get(path) === current) fileWriteQueues.delete(path);
+  });
+}
+
+async function atomicWriteJson(path, value) {
+  const temp = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    await rename(temp, path);
+  } finally {
+    await rm(temp, { force: true }).catch(() => undefined);
+  }
+}
+
 function pickConfig(value) {
   const base = defaults();
   if (!value || typeof value !== 'object') return base;
@@ -325,13 +349,13 @@ async function readConfig() {
 }
 
 async function writeConfig(value) {
-  const next = pickConfig({ ...(await readConfig()), ...value });
   const path = configPath();
-  await mkdir(join(homedir(), '.dsh'), { recursive: true });
-  const temp = `${path}.tmp`;
-  await writeFile(temp, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
-  await rename(temp, path);
-  return next;
+  return enqueueFileWrite(path, async () => {
+    const next = pickConfig({ ...(await readConfig()), ...value });
+    await mkdir(join(homedir(), '.dsh'), { recursive: true });
+    await atomicWriteJson(path, next);
+    return next;
+  });
 }
 
 // ── bring-your-own image endpoint ────────────────────────────────────────────
@@ -340,6 +364,13 @@ async function writeConfig(value) {
 // 生图端点（地址 + 密钥 + 模型名），由插件服务端转发，密钥不出本机、不写前端。
 
 const TARGETS_VERSION = 1;
+const MAX_RELAY_RESPONSE_BYTES = 24 * 1024 * 1024;
+const MAX_RELAY_IMAGE_BYTES = 12 * 1024 * 1024;
+const MAX_RELAY_BASE64_CHARS = Math.ceil((MAX_RELAY_IMAGE_BYTES * 4) / 3) + 16;
+const MAX_RELAY_IMAGES = 8;
+const IMAGE_CONTENT_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+const IMAGE_FETCH_TIMEOUT_MS = 60_000;
+const IMAGE_FETCH_MAX_REDIRECTS = 3;
 
 function targetsPath() {
   return join(homedir(), '.dsh', 'drawcraft-targets.json');
@@ -366,7 +397,13 @@ function normalizeTarget(raw) {
     .trim()
     .replace(/\/+$/, '')
     .slice(0, 400);
-  if (!/^https?:\/\//i.test(baseUrl)) return null;
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(baseUrl);
+  } catch {
+    return null;
+  }
+  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') return null;
   const list = Array.isArray(raw.models) ? raw.models : String(raw.models || '').split(/[,，;；\s]+/);
   const models = list
     .map((item) => String(item || '').trim())
@@ -393,17 +430,18 @@ async function readTargets() {
   }
 }
 
-async function writeTargets(list) {
-  const next = {
-    version: TARGETS_VERSION,
-    targets: list.map(normalizeTarget).filter(Boolean).slice(0, 12),
-  };
+async function writeTargets(input) {
   const path = targetsPath();
-  await mkdir(join(homedir(), '.dsh'), { recursive: true });
-  const temp = `${path}.tmp`;
-  await writeFile(temp, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
-  await rename(temp, path);
-  return next.targets;
+  return enqueueFileWrite(path, async () => {
+    const source = typeof input === 'function' ? await input(await readTargets()) : input;
+    const next = {
+      version: TARGETS_VERSION,
+      targets: source.map(normalizeTarget).filter(Boolean).slice(0, 12),
+    };
+    await mkdir(join(homedir(), '.dsh'), { recursive: true });
+    await atomicWriteJson(path, next);
+    return next.targets;
+  });
 }
 
 /** 密钥只留在服务端，回给面板时打码。 */
@@ -436,12 +474,112 @@ async function readJsonLoose(req, maxBytes = 32 * 1024 * 1024) {
 
 function dataUrlToBlob(dataUrl) {
   const text = String(dataUrl || '');
-  const match = /^data:([^;,]+)?(?:;base64)?,(.*)$/s.exec(text);
+  const match = /^data:([^;,]+);base64,(.*)$/s.exec(text);
   if (!match) return null;
-  const mime = match[1] || 'image/png';
-  const bytes = Buffer.from(match[2], 'base64');
-  if (bytes.length === 0) return null;
-  return new Blob([bytes], { type: mime });
+  const mime = String(match[1] || 'image/png').toLowerCase();
+  if (!IMAGE_CONTENT_TYPES.has(mime)) return null;
+  const decoded = strictBase64(match[2], mime);
+  if (!decoded) return null;
+  return new Blob([decoded.bytes], { type: mime });
+}
+
+function privateIpv4(value) {
+  const parts = String(value).split('.').map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+  const [a, b] = parts;
+  return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) || (a === 192 && (b === 0 || b === 168)) ||
+    (a === 198 && (b === 18 || b === 19)) || a >= 224;
+}
+
+function privateIpv6(value) {
+  const normalized = String(value).toLowerCase().replace(/^\[|\]$/g, '');
+  return normalized === '::' || normalized === '::1' || normalized.startsWith('fc') || normalized.startsWith('fd') ||
+    normalized.startsWith('fe8') || normalized.startsWith('fe9') || normalized.startsWith('fea') || normalized.startsWith('feb') ||
+    normalized.startsWith('::ffff:127.') || normalized.startsWith('::ffff:10.') || normalized.startsWith('::ffff:192.168.');
+}
+
+async function publicImageUrl(value) {
+  try {
+    const url = new URL(String(value));
+    if (url.protocol !== 'http:' && url.protocol !== 'https:' || url.username || url.password) return null;
+    const host = url.hostname;
+    const ipVersion = isIP(host);
+    if ((ipVersion === 4 && privateIpv4(host)) || (ipVersion === 6 && privateIpv6(host))) return null;
+    if (!ipVersion) {
+      const records = await lookup(host, { all: true, verbatim: true });
+      if (!records.length || records.some((record) => record.family === 4 ? privateIpv4(record.address) : privateIpv6(record.address))) return null;
+    }
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+function detectImageMime(bytes) {
+  if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return 'image/png';
+  if (bytes.subarray(0, 3).equals(Buffer.from([255, 216, 255]))) return 'image/jpeg';
+  const header = bytes.subarray(0, 6).toString('ascii');
+  if (header === 'GIF87a' || header === 'GIF89a') return 'image/gif';
+  if (bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
+  return '';
+}
+
+function strictBase64(value, mime = '') {
+  const encoded = String(value || '').replace(/\s+/g, '');
+  if (!encoded || encoded.length > MAX_RELAY_BASE64_CHARS || encoded.length % 4 === 1 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded) || (encoded.includes('=') && !/=+$/.test(encoded))) return null;
+  const bytes = Buffer.from(encoded, 'base64');
+  if (bytes.length === 0 || bytes.length > MAX_RELAY_IMAGE_BYTES) return null;
+  const detected = detectImageMime(bytes);
+  if (!detected || (mime && detected !== mime)) return null;
+  return { encoded, bytes, mime: detected };
+}
+
+async function readResponseBytes(response, maxBytes) {
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) throw new Error('上游响应过大');
+  if (!response.body) return Buffer.alloc(0);
+  const reader = response.body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) throw new Error('上游响应过大');
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, size);
+}
+
+async function fetchImage(url) {
+  let current = await publicImageUrl(url);
+  if (!current) return null;
+  for (let redirects = 0; redirects <= IMAGE_FETCH_MAX_REDIRECTS; redirects += 1) {
+    const remote = await fetch(current, {
+      redirect: 'manual',
+      signal: AbortSignal.timeout(IMAGE_FETCH_TIMEOUT_MS),
+    });
+    if (remote.status >= 300 && remote.status < 400) {
+      if (redirects === IMAGE_FETCH_MAX_REDIRECTS) return null;
+      const location = remote.headers.get('location');
+      current = location ? await publicImageUrl(new URL(location, current)) : null;
+      if (!current) return null;
+      continue;
+    }
+    if (!remote.ok) return null;
+    const mime = String(remote.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase();
+    if (!IMAGE_CONTENT_TYPES.has(mime)) return null;
+    const bytes = await readResponseBytes(remote, MAX_RELAY_IMAGE_BYTES);
+    const detected = detectImageMime(bytes);
+    if (!detected || detected !== mime) return null;
+    return { b64: bytes.toString('base64'), mime: detected };
+  }
+  return null;
 }
 
 async function imagesFromPayload(payload) {
@@ -451,18 +589,18 @@ async function imagesFromPayload(payload) {
       ? payload.images
       : [];
   const shots = [];
-  for (const item of items.slice(0, 8)) {
+  for (const item of items.slice(0, MAX_RELAY_IMAGES)) {
     const inline = item?.b64_json || item?.b64;
     if (typeof inline === 'string' && inline) {
-      shots.push({ b64: inline, mime: 'image/png' });
+      const mime = IMAGE_CONTENT_TYPES.has(String(item?.mime || '').toLowerCase()) ? String(item.mime).toLowerCase() : '';
+      const decoded = strictBase64(inline, mime);
+      if (decoded) shots.push({ b64: decoded.encoded, mime: decoded.mime });
       continue;
     }
     if (typeof item?.url === 'string' && item.url) {
       try {
-        const remote = await fetch(item.url, { signal: AbortSignal.timeout(60000) });
-        if (!remote.ok) continue;
-        const bytes = Buffer.from(await remote.arrayBuffer());
-        shots.push({ b64: bytes.toString('base64'), mime: remote.headers.get('content-type') || 'image/png' });
+        const shot = await fetchImage(item.url);
+        if (shot) shots.push(shot);
       } catch {
         /* 单张取不回来不影响别的 */
       }
@@ -507,7 +645,16 @@ async function relayRender(target, body) {
   } catch (error) {
     return { ok: false, code: 'network', message: `连不上 ${target.baseUrl}：${redact(textOf(error))}` };
   }
-  const text = await response.text().catch(() => '');
+  let text = '';
+  try {
+    text = (await readResponseBytes(response, MAX_RELAY_RESPONSE_BYTES)).toString('utf8');
+  } catch (error) {
+    return { ok: false, code: 'upstream-response-too-large', message: redact(textOf(error)), durationMs: Date.now() - started };
+  }
+  const responseType = String(response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase();
+  if (responseType !== 'application/json') {
+    return { ok: false, code: 'upstream-content-type', message: '上游响应必须是 application/json', durationMs: Date.now() - started };
+  }
   let payload = null;
   try {
     payload = JSON.parse(text);
@@ -1021,18 +1168,21 @@ export function apply(ctx) {
               writeJson(res, 200, { ok: false, code: 'bad-target', message: '地址要以 http(s):// 开头，模型名至少填一个' });
               return;
             }
-            const index = list.findIndex((item) => item.id === draft.id);
-            // 表单里密钥留空表示「不改」，不要把已存的密钥抹掉。
-            if (!draft.apiKey && index >= 0) draft.apiKey = list[index].apiKey;
-            if (index >= 0) list[index] = draft;
-            else list.push(draft);
-            const saved = await writeTargets(list);
+            const saved = await writeTargets((current) => {
+              const next = current.slice();
+              const index = next.findIndex((item) => item.id === draft.id);
+              // 表单里密钥留空表示「不改」，不要把已存的密钥抹掉。
+              if (!draft.apiKey && index >= 0) draft.apiKey = next[index].apiKey;
+              if (index >= 0) next[index] = draft;
+              else next.push(draft);
+              return next;
+            });
             writeJson(res, 200, { ok: true, targets: saved.map(publicTarget) });
             return;
           }
           if (action === 'remove') {
             const id = String(body.id || '');
-            const saved = await writeTargets(list.filter((item) => item.id !== id));
+            const saved = await writeTargets((current) => current.filter((item) => item.id !== id));
             writeJson(res, 200, { ok: true, targets: saved.map(publicTarget) });
             return;
           }
