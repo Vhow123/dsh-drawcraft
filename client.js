@@ -19,6 +19,10 @@ window.__ModuleLoader__.load({
     const HOST_STALE = 'HOST_STALE';
     // 本机 dsh-imagegen 插件暴露的设置视图与生图代理接口；没装时都返回 404。
     const IMAGE_CHANNELS_API = '/api/dsh-imagegen/settings/describe';
+    const IMAGE_CHANNELS_MUTATE_API = '/api/dsh-imagegen/settings/mutate';
+    // 宿主设置一时读不到（页面没刷新、宿主刚重启）时，用上次成功读到的渠道列表兜底，
+    // 免得用户看见「还没配置」以为模型被删了。
+    const IMAGE_CHANNELS_CACHE_KEY = 'dsh-drawcraft:image-channels:v1';
     // 按渠道向上游探一次真实可用模型；失败就沿用设置里的模型目录。
     const IMAGE_MODELS_API = '/api/dsh-imagegen/image-models';
     const GENERATE_API = '/api/dsh-imagegen/generate';
@@ -38,6 +42,7 @@ window.__ModuleLoader__.load({
     // 改名前的老键：读一次就搬过来，免得用户的选择与历史凭空消失。
     const LEGACY_STORE_KEY = 'dsh-image-prompt-forge:v1';
     const HISTORY_LIMIT = 24;
+    const HISTORY_THUMB_EDGE = 512;
     // 无限画布自己一份存储：图多的时候 JSON 会很大，不能和普通设置挤在同一个键里。
     const CANVAS_KEY = 'dsh-drawcraft:canvas:v1';
     const CANVAS_WORKSPACE_KEY = 'dsh-drawcraft:canvases:v1';
@@ -52,7 +57,7 @@ window.__ModuleLoader__.load({
     // 撤销栈深度。每步存的是整份画布快照，40 步够用又不会把内存撑爆。
     const CANVAS_HISTORY = 40;
     // 页脚显示，用来一眼判断浏览器加载的是哪一版 bundle（缓存排查用）。
-    const BUILD = '1.11.0';
+    const BUILD = '1.11.2';
 
     // Labels are duplicated from engine.js on purpose: client.js is loaded as a
     // separate bundle and cannot import ESM. The host catalog (fetched on open)
@@ -150,11 +155,13 @@ window.__ModuleLoader__.load({
       breakdown: '画面拆解',
       history: '历史',
       historyEmpty: '还没有生成记录',
+      imageHistory: '生图记录',
       historyTitle: '历史记录',
       newSession: '新建',
       newSessionHint: '清空当前页面，从头开始',
       historySearch: '搜索历史…',
       historyNoMatch: '没有匹配的记录',
+      deleteHistory: '删除记录',
       copy: '复制',
       copied: '已复制',
       copyField: '复制此字段',
@@ -240,6 +247,24 @@ window.__ModuleLoader__.load({
       targetSaved: '已保存',
       targetNeedUrl: '地址要以 http(s):// 开头，模型名至少填一个',
       targetHint: '填 OpenAI 兼容的生图接口地址，插件在本机转发，密钥只存在 ~/.dsh/drawcraft-targets.json。',
+      channelManage: '管理出图渠道',
+      channelManageHint: '删除用不上的渠道，或清理自己添加的模型来源',
+      channelDelete: '删掉这个渠道',
+      channelDeleteAsk: '删除这个渠道？它会从本机生图插件的设置里移除，其他会话也不再用得到。',
+      channelDeleted: '已删除',
+      channelDeleteFail: '删除失败，请稍后再试',
+      channelEmpty: '还没有可用的渠道',
+      channelModels: '个模型',
+      channelStale: '设置暂时没读到，先用上次的渠道列表；重启一次桌面端就能恢复',
+      channelEdit: '编辑',
+      channelEditHint: '改这个名字或接口地址',
+      channelEditName: '渠道名称',
+      channelEditUrl: '接口地址',
+      channelSave: '保存',
+      channelCancel: '取消',
+      channelSaved: '已保存',
+      channelSaveFail: '保存失败，请稍后再试',
+      channelNeedUrl: '地址要以 http(s):// 开头',
       imageSize: '出图尺寸',
       imageQuality: '出图清晰度',
       sizeAuto: '跟随画幅',
@@ -253,17 +278,21 @@ window.__ModuleLoader__.load({
       canvasResult: '出图',
       canvasEmpty: '画布是空的',
       canvasEmptyHint: '左上角加图或加提示词，也可以直接 Ctrl+V 粘贴。',
+      canvasLoading: '正在恢复画布图片…',
       canvasGenerate: '用选中的出图',
       canvasPickFirst: '先点中要用的节点（按住 Shift 可多选）',
       canvasNeedWords: '选中的东西里既没有文字也没有图',
       canvasWorking: '正在出图…',
       canvasDone: '出好了',
-      canvasQuota: '图太多，超出浏览器存储上限，这一批只留了排版',
-      canvasFull: '存储写不进去，画布这次的改动没保住',
+      canvasQuota: '图片数据已迁入本机 IndexedDB，浏览器仅保存画布布局与图片索引',
+      canvasAssetSaveFailed: '浏览器图片仓库写入失败，这次画布图片尚未保存',
+      canvasFull: '画布索引写入失败，这次改动尚未保存',
       canvasBadImage: '这张图读不出来',
       canvasFollowImage: '按这张图的样子生成，保持人物与构图',
       canvasFit: '适配',
       canvasClear: '清空画布',
+      canvasFull: '全屏',
+      canvasFullExit: '退出全屏',
       canvasClearAsk: '清空整个画布？清空后仍可用撤销恢复。',
       newCanvas: '新建画布',
       newCanvasHint: '保留旧画布并创建一张新的空白画布',
@@ -377,11 +406,13 @@ window.__ModuleLoader__.load({
       breakdown: 'Breakdown',
       history: 'History',
       historyEmpty: 'Nothing generated yet',
+      imageHistory: 'Image render',
       historyTitle: 'History',
       newSession: 'New',
       newSessionHint: 'Clear this page and start over',
       historySearch: 'Search history…',
       historyNoMatch: 'No matching entry',
+      deleteHistory: 'Delete history entry',
       copy: 'Copy',
       copied: 'Copied',
       copyField: 'Copy this field',
@@ -467,6 +498,24 @@ window.__ModuleLoader__.load({
       targetSaved: 'Saved',
       targetNeedUrl: 'The URL must start with http(s):// and you need at least one model name',
       targetHint: 'Point it at any OpenAI-compatible image endpoint. The plugin relays the call locally; the key only lives in ~/.dsh/drawcraft-targets.json.',
+      channelManage: 'Manage channels',
+      channelManageHint: 'Remove channels you no longer use, or clean up image sources you added',
+      channelDelete: 'Remove this channel',
+      channelDeleteAsk: 'Remove this channel? It will be deleted from the local image plugin settings, so other sessions lose it too.',
+      channelDeleted: 'Removed',
+      channelDeleteFail: 'Removal failed, try again later',
+      channelEmpty: 'No channels yet',
+      channelModels: 'models',
+      channelStale: 'Settings unavailable — showing the last known channels. Restart the desktop app to refresh.',
+      channelEdit: 'Edit',
+      channelEditHint: 'Change the name or the endpoint',
+      channelEditName: 'Channel name',
+      channelEditUrl: 'Endpoint',
+      channelSave: 'Save',
+      channelCancel: 'Cancel',
+      channelSaved: 'Saved',
+      channelSaveFail: 'Save failed, try again later',
+      channelNeedUrl: 'The URL must start with http(s)://',
       imageSize: 'Size',
       imageQuality: 'Quality',
       sizeAuto: 'Follow aspect',
@@ -485,12 +534,16 @@ window.__ModuleLoader__.load({
       canvasNeedWords: 'Nothing selected has text or an image',
       canvasWorking: 'Rendering…',
       canvasDone: 'Done',
-      canvasQuota: 'Too many images for browser storage — this batch kept only the layout',
-      canvasFull: 'Storage refused the write, this change was not saved',
+      canvasQuota: 'Image data is stored in local IndexedDB; the browser keeps only canvas layout and image references',
+      canvasAssetSaveFailed: 'The browser image store failed to save this canvas image',
+      canvasFull: 'The canvas index could not be saved',
+      canvasLoading: 'Restoring canvas images…',
       canvasBadImage: 'That image could not be read',
       canvasFollowImage: 'Render in the style of this image, keeping the subject and framing',
       canvasFit: 'Fit',
       canvasClear: 'Clear canvas',
+      canvasFull: 'Fullscreen',
+      canvasFullExit: 'Exit fullscreen',
       canvasClearAsk: 'Clear the whole canvas? You can still undo this change.',
       newCanvas: 'New canvas',
       newCanvasHint: 'Keep the old canvas and create a new blank canvas',
@@ -603,7 +656,16 @@ window.__ModuleLoader__.load({
 .dpf-rail-head button:hover{opacity:1;color:var(--dsw-alias-text-primary,#dededf)}
 .dpf-rail-list{flex:1;min-height:0;overflow:auto;padding:0 8px 10px;display:flex;flex-direction:column;gap:2px}
 .dpf-rail-item{appearance:none;border:0;background:none;color:inherit;font:inherit;text-align:left;padding:7px 8px;border-radius:7px;cursor:pointer;display:flex;flex-direction:column;gap:2px;width:100%}
-.dpf-rail-item:hover{background:#ffffff0f}
+.dpf-rail-image-item{display:grid;grid-template-columns:34px minmax(0,1fr);grid-template-rows:auto auto;column-gap:8px;align-items:center}
+.dpf-rail-image-item .dpf-history-thumb{grid-row:1 / span 2}
+.dpf-rail-image-item b,.dpf-rail-image-item span{min-width:0;width:100%}
+.dpf-rail-entry{position:relative;display:flex;align-items:center;gap:3px;border-radius:7px}
+.dpf-rail-entry:hover{background:#ffffff0f}
+.dpf-rail-entry .dpf-rail-item{flex:1;min-width:0}
+.dpf-history-delete{appearance:none;flex:none;border:0;border-radius:5px;background:transparent;color:var(--dsw-alias-text-secondary,#7d7d84);font:inherit;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0}
+.dpf-history-delete:hover,.dpf-history-delete:focus-visible{background:#ef44441a;color:#dc2626;outline:none}
+.dpf-rail-entry .dpf-history-delete{margin-right:4px}
+.dpf-rail-item:hover{background:transparent}
 .dpf-rail-item b{font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
 .dpf-rail-item span{font-size:10.5px;color:var(--dsw-alias-text-secondary,#7d7d84);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
 .dpf-rail-empty{padding:10px;font-size:11.5px;color:var(--dsw-alias-text-secondary,#7d7d84)}
@@ -636,6 +698,17 @@ window.__ModuleLoader__.load({
 .dpf-target-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .dpf-target-msg{font-size:11px;color:var(--dsw-alias-text-secondary,#9a9aa2);word-break:break-word}
 .dpf-target-msg.is-bad{color:var(--dsw-alias-text-danger,#ef767a)}
+.dpf-channel-list{gap:5px}
+.dpf-channel-head{font-size:11px;font-weight:600;color:#475569}
+.dpf-channel-row{display:flex;align-items:center;gap:8px;padding:4px 7px;border-radius:7px;background:#f8fafc;border:1px solid #eef2f7}
+.dpf-channel-row .dpf-channel-name{flex:1;min-width:0;font-size:12px;color:#172033;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dpf-channel-row .dpf-channel-meta{font-size:11px;color:#94a3b8;white-space:nowrap}
+.dpf-channel-row .dpf-icon-btn{width:20px;height:20px;line-height:1;font-size:13px}
+.dpf-channel-row.dpf-channel-editing{display:grid;gap:5px;background:#f8fafc;padding:7px 8px}
+.dpf-channel-input{font-size:12px;padding:5px 8px}
+.dpf-channel-actions{display:flex;gap:6px}
+.dpf-channel-stale{display:block;margin-top:4px;font-size:11px;line-height:1.5;color:#b45309}
+.dpf-channel-actions .dpf-btn{padding:4px 10px;font-size:12px}
 .dpf-icon-btn{width:26px;height:26px;flex:none;border-radius:7px;border:1px dashed var(--dsw-alias-border-default,#ffffff2e);background:transparent;color:inherit;font-size:15px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0}
 .dpf-icon-btn:hover{background:#ffffff10}
 .dpf-select{-webkit-appearance:none;appearance:none;background-image:linear-gradient(45deg,transparent 50%,#888 50%),linear-gradient(135deg,#888 50%,transparent 50%);background-position:calc(100% - 15px) 50%,calc(100% - 10px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:28px}
@@ -723,8 +796,12 @@ window.__ModuleLoader__.load({
 .dpf-tab:hover{color:var(--dsw-alias-text-primary,#ddd)}
 .dpf-tab[data-active=true]{color:var(--dsw-alias-text-primary,#ededf0);border-bottom-color:var(--dsw-alias-interactive-primary,#c9b6ff)}
 .dpf-history{display:flex;flex-direction:column;gap:6px}
-.dpf-history-item{display:flex;align-items:flex-start;gap:8px;padding:9px 10px;border:1px solid var(--dsw-alias-border-default,#ffffff12);border-radius:9px;background:var(--dsw-alias-bg-secondary,#ffffff04);cursor:pointer;text-align:left;color:inherit;font:inherit;width:100%}
+.dpf-history-row{display:flex;align-items:center;gap:6px}
+.dpf-history-item{display:flex;align-items:flex-start;gap:8px;padding:9px 10px;border:1px solid var(--dsw-alias-border-default,#ffffff12);border-radius:9px;background:var(--dsw-alias-bg-secondary,#ffffff04);cursor:pointer;text-align:left;color:inherit;font:inherit;width:100%;min-width:0}
 .dpf-history-item:hover{border-color:var(--dsw-alias-border-focused,#ffffff26);background:var(--dsw-alias-bg-hover,#ffffff09)}
+.dpf-history-row .dpf-history-delete{border:1px solid var(--dsw-alias-border-default,#ffffff20);background:var(--dsw-alias-bg-secondary,#ffffff08)}
+.dpf-history-thumb{width:40px;height:40px;flex:none;object-fit:cover;border-radius:5px;border:1px solid var(--dsw-alias-border-default,#ffffff14)}
+.dpf-rail-item .dpf-history-thumb{width:34px;height:34px}
 .dpf-history-main{flex:1;min-width:0}
 .dpf-history-title{font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dpf-history-sub{font-size:11px;color:var(--dsw-alias-text-secondary,#86868c);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -858,9 +935,24 @@ window.__ModuleLoader__.load({
 .dpf-canvas-port{border-color:#fff;box-shadow:0 0 0 1px #2563eb,0 2px 6px #0f172a33}
 .dpf-canvas-badge{background:#2563eb;color:#fff}
 .dpf-canvas-foot{color:#64748b}
-.dpf-panel .dpf-canvas-new{background:#1f2937;color:#fff;border-color:#1f2937}
-.dpf-panel .dpf-canvas-new:hover{background:#111827}
+.dpf-canvas-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#f8fafce8;color:#334155;font-size:13px;z-index:10;pointer-events:auto}
+.dpf-panel .dpf-canvas-new{background:#1f2937;color:#fff;border-color:#1f2937}.dpf-panel .dpf-canvas-new:hover{background:#111827}
 .dpf-panel .dpf-lightbox,.dpf-panel .dpf-lightbox *{color-scheme:dark}
+/* 画布页把左栏收成窄条：历史列表在画布上没有意义，留着只会把画布挤成「画中画」。 */
+.dpf-shell[data-canvas="1"] .dpf-rail{width:74px;overflow:hidden}
+.dpf-shell[data-canvas="1"] .dpf-rail-brand{padding:12px 0;justify-content:center}
+.dpf-shell[data-canvas="1"] .dpf-rail-brand>div{display:none}
+.dpf-shell[data-canvas="1"] .dpf-rail-tabs{flex-direction:column;margin:0 8px 8px}
+.dpf-shell[data-canvas="1"] .dpf-rail-head,
+.dpf-shell[data-canvas="1"] .dpf-rail-search,
+.dpf-shell[data-canvas="1"] .dpf-rail-list,
+.dpf-shell[data-canvas="1"] .dpf-rail-foot{display:none}
+/* 全屏：画布页可以撑满整个浏览器视口，不再只是面板里的一个窗口。 */
+.dpf-panel.dpf-panel-full{position:fixed;inset:0;width:100vw;height:100vh;max-width:none;max-height:none;border:0;border-radius:0;z-index:2147483000}
+/* 工具条单行横排：按钮一多就横向滚动，别折成一块浮在画布上的「小窗口」。 */
+.dpf-canvas-tools{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
+.dpf-canvas-tools>*{flex:0 0 auto}
+.dpf-canvas-workspace{flex-wrap:nowrap}
 `;
 
     // locale 的 translate 是扁平查表（lib/client.js:1433 用 dict[key] 直接取值），
@@ -928,6 +1020,110 @@ window.__ModuleLoader__.load({
          * 原图往往几 MB，直接上传既慢又容易顶到宿主上限；这里先在 canvas 里缩一次，
          * 缩不动（解码失败）就退回原始 data URL，让宿主去判断。
          */
+        const HISTORY_DB_NAME = 'dsh-drawcraft-history';
+        const HISTORY_DB_STORE = 'images';
+        const CANVAS_DB_STORE = 'canvas-assets';
+        const CANVAS_ASSET_PREFIX = 'drawcraft-canvas:';
+        let historyDbPromise = null;
+        let canvasAssetWriteQueue = Promise.resolve();
+        const canvasAssetCache = new Map();
+
+        function openHistoryDb() {
+          if (typeof indexedDB === 'undefined') return Promise.resolve(null);
+          if (!historyDbPromise) {
+            historyDbPromise = new Promise((resolve) => {
+              try {
+                const request = indexedDB.open(HISTORY_DB_NAME, 2);
+                request.onupgradeneeded = () => {
+                  if (!request.result.objectStoreNames.contains(HISTORY_DB_STORE)) request.result.createObjectStore(HISTORY_DB_STORE);
+                  if (!request.result.objectStoreNames.contains(CANVAS_DB_STORE)) request.result.createObjectStore(CANVAS_DB_STORE);
+                };
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => resolve(null);
+                request.onblocked = () => {
+                  historyDbPromise = null;
+                  resolve(null);
+                };
+              } catch {
+                resolve(null);
+              }
+            });
+          }
+          return historyDbPromise;
+        }
+
+        async function writeHistoryImages(id, images) {
+          const db = await openHistoryDb();
+          if (!db || !id || !Array.isArray(images) || images.length === 0) return false;
+          return new Promise((resolve) => {
+            try {
+              const transaction = db.transaction(HISTORY_DB_STORE, 'readwrite');
+              transaction.objectStore(HISTORY_DB_STORE).put(images, id);
+              transaction.oncomplete = () => resolve(true);
+              transaction.onerror = transaction.onabort = () => resolve(false);
+            } catch {
+              resolve(false);
+            }
+          });
+        }
+
+        async function readHistoryImages(id) {
+          const db = await openHistoryDb();
+          if (!db || !id) return null;
+          return new Promise((resolve) => {
+            try {
+              const request = db.transaction(HISTORY_DB_STORE, 'readonly').objectStore(HISTORY_DB_STORE).get(id);
+              request.onsuccess = () => resolve(Array.isArray(request.result) ? request.result : null);
+              request.onerror = () => resolve(null);
+            } catch {
+              resolve(null);
+            }
+          });
+        }
+
+        async function deleteHistoryImages(id) {
+          const db = await openHistoryDb();
+          if (!db || !id) return;
+          try {
+            db.transaction(HISTORY_DB_STORE, 'readwrite').objectStore(HISTORY_DB_STORE).delete(id);
+          } catch {
+            /* History metadata remains usable through its thumbnail. */
+          }
+        }
+
+        async function clearHistoryImages() {
+          const db = await openHistoryDb();
+          if (!db) return;
+          try {
+            db.transaction(HISTORY_DB_STORE, 'readwrite').objectStore(HISTORY_DB_STORE).clear();
+          } catch {
+            /* The prompt history is stored separately in localStorage. */
+          }
+        }
+
+        async function historyThumbnail(shot) {
+          if (!shot?.b64 || typeof document === 'undefined') return '';
+          try {
+            const image = new Image();
+            const loaded = new Promise((resolve, reject) => {
+              image.onload = resolve;
+              image.onerror = reject;
+            });
+            image.src = `data:${shot.mime || 'image/png'};base64,${shot.b64}`;
+            await loaded;
+            const scale = Math.min(1, HISTORY_THUMB_EDGE / Math.max(image.naturalWidth || 1, image.naturalHeight || 1));
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round((image.naturalWidth || 1) * scale));
+            canvas.height = Math.max(1, Math.round((image.naturalHeight || 1) * scale));
+            const context = canvas.getContext('2d');
+            if (!context) return '';
+            context.drawImage(image, 0, 0, canvas.width, canvas.height);
+            return canvas.toDataURL('image/jpeg', 0.72);
+          } catch {
+            return '';
+          }
+        }
+
         async function readImageFile(file, maxEdge = IMAGE_MAX_EDGE) {
           const raw = await new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -1078,6 +1274,15 @@ window.__ModuleLoader__.load({
         const CANVAS_OPAQUE_NOTE = {
           en: 'Any sheer or see-through garment in the references must be made into an opaque fabric; nothing may show through the neckline or chest.\n\n',
           zh: '参考图里的透视、薄纱面料一律做成不透明的实拍面料，领口与胸口不得透出皮肤轮廓。\n\n',
+        };
+
+        /**
+         * 姿势库给的是白模/深度图。只把图塞进 images 里，模型会把它当成又一张「参考风格」，
+         * 姿势照样自己编；必须同时在提示词里点名「按这张图的姿态」，否则等于没发。
+         */
+        const POSE_NOTE = {
+          en: 'The pose reference image is binding: copy its limb positions, body orientation and camera angle exactly. Do not substitute another pose. The grey mannequin only supplies the pose — never copy its skin, material, lighting or rendering style.\\n\\n',
+          zh: '姿势参考图是硬约束：四肢位置、身体朝向、镜头角度都照它来，不要换成别的姿势。白模只提供姿态，不要复制它的肤色、材质、光照与渲染风格。\\n\\n',
         };
 
         const CANVAS_CARD_EDGE = 960;
@@ -1303,8 +1508,7 @@ window.__ModuleLoader__.load({
           }
         }
 
-        // 画布状态：节点、血缘边、视口。图多了会撞 localStorage 配额，
-        // 所以超限时退一步——先把图丢掉只留骨架，再不行就整个不存。
+        // 画布索引只保存节点、血缘边、视口与资产引用；图片二进制单独存入 IndexedDB。
         const EMPTY_CANVAS = { nodes: [], edges: [], view: { x: 0, y: 0, scale: 1 } };
 
         // 画布导入/读取共用的严格数据边界：避免坏坐标、重复 ID、伪图片和悬空边
@@ -1357,7 +1561,8 @@ window.__ModuleLoader__.load({
               id: canvasValidId(item?.id) ? item.id : '',
               title: text(item?.title, 120),
               src: canvasValidImage(item?.src) && String(item.src).length <= CANVAS_IMPORT_MAX_BYTES ? item.src : '',
-            })).filter((item) => item.id || item.src);
+              ...(typeof item?.assetRef === 'string' && item.assetRef.startsWith(CANVAS_ASSET_PREFIX) ? { assetRef: item.assetRef } : {}),
+            })).filter((item) => item.id || item.src || item.assetRef);
           }
           return Object.keys(out).length ? out : undefined;
         }
@@ -1396,6 +1601,7 @@ window.__ModuleLoader__.load({
               title: typeof node.title === 'string' ? node.title.slice(0, 500) : '',
               note: typeof node.note === 'string' ? node.note.slice(0, 1000) : '',
               ...(node.lost ? { lost: true } : {}),
+              ...(typeof node.assetRef === 'string' && node.assetRef.startsWith(CANVAS_ASSET_PREFIX) ? { assetRef: node.assetRef } : {}),
               ...(node.subject ? { subject: true } : {}),
               ...(meta ? { meta } : {}),
             });
@@ -1465,57 +1671,215 @@ window.__ModuleLoader__.load({
             activeId: 'cw_default',
             items: [{ id: 'cw_default', name: DEFAULT_CANVAS_NAME, createdAt: now, updatedAt: now, state: legacy }],
           }, now);
-          writeCanvasWorkspace(workspace);
           return workspace;
         }
 
-        function writeCanvasWorkspace(value) {
+        function canvasAssetKey(canvasId, nodeId, slot = 'image') {
+          return `${CANVAS_ASSET_PREFIX}${canvasId}:${nodeId}:${slot}`;
+        }
+
+        function serializeCanvasWorkspace(value) {
           const workspace = normalizeCanvasWorkspace(value);
-          const payload = { version: 1, activeId: workspace.activeId, items: workspace.items };
+          return {
+            version: 1,
+            activeId: workspace.activeId,
+            items: workspace.items.map((item) => ({
+              ...item,
+              state: {
+                ...item.state,
+                nodes: item.state.nodes.map((node) => {
+                  const key = node.kind === 'image' && (node.src || node.assetRef) ? canvasAssetKey(item.id, node.id) : '';
+                  const referenceSources = node.meta?.referenceSources?.map((reference, index) => ({
+                    ...reference,
+                    ...(reference.src || reference.assetRef ? { assetRef: canvasAssetKey(item.id, node.id, `reference-${index}`) } : {}),
+                    src: '',
+                  }));
+                  return {
+                    ...node,
+                    ...(key ? { assetRef: key } : {}),
+                    src: '',
+                    ...(node.meta ? { meta: { ...node.meta, ...(referenceSources ? { referenceSources } : {}) } } : {}),
+                  };
+                }),
+              },
+            })),
+          };
+        }
+
+        function writeCanvasWorkspace(value) {
+          const payload = serializeCanvasWorkspace(value);
           try {
             localStorage.setItem(CANVAS_WORKSPACE_KEY, JSON.stringify(payload));
             return '';
           } catch {
-            try {
-              const slimItems = workspace.items.map((item) => ({
-                ...item,
-                state: {
-                  ...item.state,
-                  nodes: item.state.nodes.map((node) => ({ ...node, src: '', lost: Boolean(node.src), ...(node.meta ? { meta: { ...node.meta, referenceSources: [] } } : {}) })),
-                },
-              }));
-              localStorage.setItem(CANVAS_WORKSPACE_KEY, JSON.stringify({ ...payload, items: slimItems }));
-              return 'quota';
-            } catch {
-              // 最后仍保留所有画布的名称、ID、节点布局和视口；不能为了写入当前画布而静默删除其他画布。
-              const layoutItems = workspace.items.map((item) => ({
-                ...item,
-                state: {
-                  nodes: item.state.nodes.map((node) => ({
-                    id: node.id,
-                    kind: node.kind,
-                    x: node.x,
-                    y: node.y,
-                    w: node.w,
-                    h: node.h,
-                    title: node.title,
-                    src: '',
-                    text: node.text,
-                    note: node.note,
-                    ...(node.lost || node.src ? { lost: Boolean(node.src) || Boolean(node.lost) } : {}),
-                  })),
-                  edges: item.state.edges,
-                  view: item.state.view,
-                },
-              }));
+            return 'full';
+          }
+        }
+
+        function canvasDataUrlBlob(dataUrl) {
+          const match = /^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=]+)$/i.exec(dataUrl || '');
+          if (!match) return null;
+          const binary = atob(match[2]);
+          const bytes = new Uint8Array(binary.length);
+          for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+          return new Blob([bytes], { type: match[1] });
+        }
+
+        function canvasBlobDataUrl(blob) {
+          return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ''));
+            reader.onerror = () => resolve('');
+            reader.readAsDataURL(blob);
+          });
+        }
+
+        function writeCanvasAssetBatch(entries) {
+          if (!entries.length) return Promise.resolve(true);
+          return openHistoryDb().then((db) => {
+            if (!db) return false;
+            return new Promise((resolve) => {
               try {
-                localStorage.setItem(CANVAS_WORKSPACE_KEY, JSON.stringify({ ...payload, items: layoutItems }));
-                return 'quota';
+                const transaction = db.transaction(CANVAS_DB_STORE, 'readwrite');
+                const store = transaction.objectStore(CANVAS_DB_STORE);
+                for (const [key, data] of entries) {
+                  const blob = canvasDataUrlBlob(data);
+                  if (!blob) throw new Error('Invalid canvas image data');
+                  store.put(blob, key);
+                }
+                transaction.oncomplete = () => resolve(true);
+                transaction.onerror = transaction.onabort = () => resolve(false);
               } catch {
-                return 'full';
+                resolve(false);
+              }
+            });
+          });
+        }
+
+        function readCanvasAssets(keys) {
+          if (!keys.length) return Promise.resolve(new Map());
+          return openHistoryDb().then((db) => {
+            if (!db) return new Map();
+            return new Promise((resolve) => {
+              const result = new Map();
+              const pending = [];
+              try {
+                const transaction = db.transaction(CANVAS_DB_STORE, 'readonly');
+                const store = transaction.objectStore(CANVAS_DB_STORE);
+                for (const key of keys) {
+                  const request = store.get(key);
+                  request.onsuccess = () => {
+                    if (request.result instanceof Blob) pending.push(canvasBlobDataUrl(request.result).then((data) => { if (data) result.set(key, data); }));
+                    else if (typeof request.result === 'string' && canvasValidImage(request.result)) result.set(key, request.result);
+                  };
+                }
+                transaction.oncomplete = () => Promise.all(pending).then(() => resolve(result));
+                transaction.onerror = transaction.onabort = () => resolve(new Map());
+              } catch {
+                resolve(new Map());
+              }
+            });
+          });
+        }
+
+        function canvasAssets(workspace) {
+          const entries = [];
+          for (const item of workspace.items) {
+            for (const node of item.state.nodes) {
+              if (node.kind === 'image' && node.src) entries.push([canvasAssetKey(item.id, node.id), node.src]);
+              for (const [index, reference] of (node.meta?.referenceSources || []).entries()) {
+                if (reference.src) entries.push([canvasAssetKey(item.id, node.id, `reference-${index}`), reference.src]);
               }
             }
           }
+          return entries;
+        }
+
+        async function persistCanvasWorkspace(value, sequenceIsCurrent = () => true) {
+          const workspace = normalizeCanvasWorkspace(value);
+          const assets = canvasAssets(workspace);
+          canvasAssetWriteQueue = canvasAssetWriteQueue.catch(() => false).then(async () => {
+            const entries = assets.filter(([key, data]) => canvasAssetCache.get(key) !== data);
+            if (!entries.length) return true;
+            const written = await writeCanvasAssetBatch(entries);
+            if (written) for (const [key, data] of entries) canvasAssetCache.set(key, data);
+            return written;
+          }).catch(() => false);
+          if (!(await canvasAssetWriteQueue)) return 'asset';
+          if (!sequenceIsCurrent()) return 'stale';
+          return writeCanvasWorkspace(workspace);
+        }
+
+        function pruneCanvasAssets(workspaceSource) {
+          canvasAssetWriteQueue = canvasAssetWriteQueue.catch(() => false).then(async () => {
+            const workspace = typeof workspaceSource === 'function' ? workspaceSource() : workspaceSource;
+            const keep = new Set();
+            for (const item of workspace.items) {
+              for (const node of item.state.nodes) {
+                if (node.kind === 'image') keep.add(canvasAssetKey(item.id, node.id));
+                for (const [index, reference] of (node.meta?.referenceSources || []).entries()) {
+                  if (reference.src || reference.assetRef) keep.add(canvasAssetKey(item.id, node.id, `reference-${index}`));
+                }
+              }
+            }
+            const db = await openHistoryDb();
+            if (!db) return false;
+            return new Promise((resolve) => {
+              try {
+                const transaction = db.transaction(CANVAS_DB_STORE, 'readwrite');
+                const request = transaction.objectStore(CANVAS_DB_STORE).openCursor();
+                request.onsuccess = () => {
+                  const cursor = request.result;
+                  if (!cursor) return;
+                  if (typeof cursor.key === 'string' && cursor.key.startsWith(CANVAS_ASSET_PREFIX) && !keep.has(cursor.key)) {
+                    cursor.delete();
+                    canvasAssetCache.delete(cursor.key);
+                  }
+                  cursor.continue();
+                };
+                transaction.oncomplete = () => resolve(true);
+                transaction.onerror = transaction.onabort = () => resolve(false);
+              } catch {
+                resolve(false);
+              }
+            });
+          }).catch(() => false);
+          return canvasAssetWriteQueue;
+        }
+
+        async function hydrateCanvasWorkspace(value) {
+          const workspace = normalizeCanvasWorkspace(value);
+          const refs = [];
+          for (const item of workspace.items) {
+            for (const node of item.state.nodes) {
+              if (node.kind === 'image') refs.push([item.id, node.id, canvasAssetKey(item.id, node.id)]);
+              for (const [index] of (node.meta?.referenceSources || []).entries()) refs.push([item.id, node.id, canvasAssetKey(item.id, node.id, `reference-${index}`), index]);
+            }
+          }
+          const assets = await readCanvasAssets(refs.map((entry) => entry[2]));
+          return {
+            ...workspace,
+            items: workspace.items.map((item) => ({
+              ...item,
+              state: {
+                ...item.state,
+                nodes: item.state.nodes.map((node) => {
+                  const src = node.kind === 'image' ? assets.get(canvasAssetKey(item.id, node.id)) || node.src : node.src;
+                  const references = node.meta?.referenceSources?.map((reference, index) => ({
+                    ...reference,
+                    src: assets.get(canvasAssetKey(item.id, node.id, `reference-${index}`)) || reference.src,
+                  }));
+                  return {
+                    ...node,
+                    src,
+                    ...(node.lost && src ? { lost: false } : {}),
+                    ...(!src && node.assetRef ? { lost: true } : {}),
+                    ...(node.meta && references ? { meta: { ...node.meta, referenceSources: references } } : {}),
+                  };
+                }),
+              },
+            })),
+          };
         }
 
         function validateCanvasPayload(value, limit = 60) {
@@ -1738,6 +2102,17 @@ window.__ModuleLoader__.load({
           const [usePoseRefs, setUsePoseRefs] = useState(false);
           // 主图是灰度/深度图时先转成等高线线稿再发，绕开上游的图片审核。
           const [neutralize, setNeutralize] = useState(true);
+          // 选了参考库里的姿势/服装图却没打开这个开关，等于白选——第一次选参考就自动打开。
+          const poseAutoRef = useRef(false);
+          useEffect(() => {
+            if (refs.length === 0) {
+              poseAutoRef.current = false;
+              return;
+            }
+            if (poseAutoRef.current) return;
+            poseAutoRef.current = true;
+            setUsePoseRefs(true);
+          }, [refs.length]);
           const [describing, setDescribing] = useState(false);
           const [dragOver, setDragOver] = useState(false);
           const [patchText, setPatchText] = useState('');
@@ -1761,6 +2136,13 @@ window.__ModuleLoader__.load({
           const fileRef = useRef(null);
           const extraRef = useRef(null);
           const probeModelsRef = useRef(null);
+          const imageChannelRevision = useRef(null);
+          const imageChannelNamespace = useRef('imagegen');
+          const [channelPanel, setChannelPanel] = useState(false);
+          const [channelEdit, setChannelEdit] = useState(null);
+          const [channelBusy, setChannelBusy] = useState(false);
+          // 渠道列表是不是从本地副本拿的（宿主设置暂时读不到）。
+          const [channelStale, setChannelStale] = useState(false);
           const [copied, copy] = useCopy();
 
           // 自带的生图端点：用户自己填地址、密钥、模型名，插件服务端转发。
@@ -1774,6 +2156,9 @@ window.__ModuleLoader__.load({
           const [targetBusy, setTargetBusy] = useState(false);
           const [targetMsg, setTargetMsg] = useState('');
           const [targetBad, setTargetBad] = useState(false);
+          // 内置 Muse 通道：不用填地址，只要登录一次；状态只在点按钮时更新。
+          const [museBusy, setMuseBusy] = useState(false);
+          const [museMsg, setMuseMsg] = useState('');
 
           // ── 三个一级页面 ────────────────────────────────────────────
           // 提示词只管写字和优化；生图只管图；画布是第三页。
@@ -1781,6 +2166,11 @@ window.__ModuleLoader__.load({
           // 生图页里的两个子页：文生图 / 图生图。
           const [imageTab, setImageTab] = useState('text');
           const canvasView = page === 'canvas';
+          // 画布可以撑满整个浏览器视口，退出画布页时自动收回。
+          const [canvasFull, setCanvasFull] = useState(false);
+          useEffect(() => {
+            if (!canvasView) setCanvasFull(false);
+          }, [canvasView]);
 
           // ── 无限画布 ────────────────────────────────────────────────
           // 和工坊共用一套出图通道，但排版、选择、血缘都是自己的。
@@ -1788,6 +2178,10 @@ window.__ModuleLoader__.load({
           const [activeCanvasId, setActiveCanvasId] = useState(() => canvasWorkspace.activeId);
           const initialCanvas = canvasWorkspace.items.find((item) => item.id === canvasWorkspace.activeId) || canvasWorkspace.items[0];
           const [canvas, setCanvas] = useState(() => initialCanvas?.state || { ...EMPTY_CANVAS });
+          const canvasHydrated = useRef(false);
+          const [canvasReady, setCanvasReady] = useState(false);
+          const canvasHydrateSeq = useRef(0);
+          const canvasHydrateReady = useRef(Promise.resolve());
           const [canvasSel, setCanvasSel] = useState([]);
           const [canvasBusy, setCanvasBusy] = useState('');
           const canvasRequestSeq = useRef(0);
@@ -2623,6 +3017,7 @@ window.__ModuleLoader__.load({
           const canvasPasteRef = useRef(null);
           useEffect(() => {
             const onPaste = (event) => {
+              if (pageRef.current === 'canvas' && !canvasReady) return;
               const items = event.clipboardData?.items;
               if (!items || isEditableTarget(event.target)) return;
               for (const item of items) {
@@ -2630,12 +3025,12 @@ window.__ModuleLoader__.load({
                 const file = item.getAsFile();
                 if (!file) continue;
                 event.preventDefault();
-                if (pageRef.current === 'canvas' && canvasPasteRef.current) canvasPasteRef.current(file);
-                else void loadShot(file);
+                if (pageRef.current === 'canvas' && canvasReady && canvasPasteRef.current) canvasPasteRef.current(file);
+                else if (pageRef.current !== 'canvas') void loadShot(file);
                 return;
               }
               // 剪贴板里没有文件：有些应用（网页、Word、QQ）复制图片时只给 HTML 或纯文本链接。
-              if (pageRef.current === 'canvas' && canvasPasteRef.current) {
+              if (pageRef.current === 'canvas' && canvasReady && canvasPasteRef.current) {
                 const html = String(event.clipboardData?.getData('text/html') || '');
                 const text = String(event.clipboardData?.getData('text/plain') || '').trim();
                 const fromHtml = (html.match(/<img[^>]+src\s*=\s*["']([^"']+)["']/i) || [])[1] || '';
@@ -2653,7 +3048,7 @@ window.__ModuleLoader__.load({
             };
             window.addEventListener('paste', onPaste);
             return () => window.removeEventListener('paste', onPaste);
-          }, [loadShot]);
+          }, [canvasReady, loadShot]);
 
           const removeRefShot = useCallback((index) => {
             setRefShots((previous) => previous.filter((_, at) => at !== index));
@@ -2714,48 +3109,276 @@ window.__ModuleLoader__.load({
 
           // ── 词 → 图（走本机 dsh-imagegen 的代理接口）─────────────────
           // 出图渠道与模型：读本机 dsh-imagegen 的设置视图，只取渠道名与模型名。
+          // 读一次宿主设置视图：拿到渠道列表、以及写回时要用的命名空间与 revision。
+          // 渠道列表的本地副本：只在宿主设置读不到时拿出来兜底显示。
+          const normalizeChannelList = (list) => (Array.isArray(list) ? list : [])
+            .map((channel) => ({
+              id: String(channel?.id ?? ''),
+              name: String(channel?.name ?? channel?.label ?? channel?.id ?? ''),
+              apiUrl: String(channel?.apiUrl ?? ''),
+              models: (Array.isArray(channel?.models) ? channel.models : [])
+                .map((entry) => (typeof entry === 'string' ? entry.trim() : String(entry?.id ?? entry?.name ?? '').trim()))
+                .filter(Boolean),
+            }))
+            .filter((channel) => channel.id !== '');
+
+          const readChannelCache = () => {
+            try {
+              const raw = window.localStorage.getItem(IMAGE_CHANNELS_CACHE_KEY);
+              if (!raw) return [];
+              return normalizeChannelList(JSON.parse(raw)?.channels);
+            } catch {
+              return [];
+            }
+          };
+
+          const writeChannelCache = (channels) => {
+            try {
+              window.localStorage.setItem(IMAGE_CHANNELS_CACHE_KEY, JSON.stringify({ at: Date.now(), channels }));
+            } catch {
+              /* 配额满也不影响主流程 */
+            }
+          };
+
+          const loadImageChannels = useCallback(async () => {
+            // 首选本插件服务端：宿主设置由服务端读，命名空间不会认错，也不依赖浏览器端鉴权。
+            try {
+              const proxied = await fetch(`${API}/image-channels`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: '{}',
+              });
+              if (proxied.ok) {
+                const data = await proxied.json().catch(() => null);
+                if (data && data.ok) {
+                  imageChannelRevision.current = typeof data.revision === 'number' ? data.revision : null;
+                  imageChannelNamespace.current = typeof data.ns === 'string' && data.ns ? data.ns : 'imagegen';
+                  const normalized = normalizeChannelList(data.channels);
+                  if (normalized.length > 0) writeChannelCache(normalized);
+                  return normalized;
+                }
+              }
+            } catch {
+              /* 老版本宿主没有这条路由，走下面的直连 */
+            }
+            const response = await fetch(IMAGE_CHANNELS_API, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: '{}',
+            });
+            if (!response.ok) return null;
+            const payload = await response.json().catch(() => null);
+            const namespaces = payload?.value?.namespaces;
+            // 不能盲取第一个：宿主里可配置的插件不止一个，顺序也不保证。
+            // 先按命名空间认 imagegen，认不出来再挑第一个真的带 channels 的。
+            const entry = Array.isArray(namespaces)
+              ? namespaces.find((row) => row?.ns === 'imagegen' || row?.ns === 'dsh-imagegen')
+                ?? namespaces.find((row) => Array.isArray(row?.value?.channels))
+                ?? null
+              : null;
+            const view = entry?.value ?? null;
+            imageChannelRevision.current = typeof entry?.revision === 'number' ? entry.revision : null;
+            imageChannelNamespace.current = typeof entry?.ns === 'string' && entry.ns ? entry.ns : 'dsh-imagegen';
+            const list = Array.isArray(view?.channels) ? view.channels : [];
+            const normalized = normalizeChannelList(list);
+            if (normalized.length > 0) writeChannelCache(normalized);
+            return normalized;
+          }, []);
+
           useEffect(() => {
             let alive = true;
             (async () => {
               try {
-                const response = await fetch(IMAGE_CHANNELS_API, {
-                  method: 'POST',
-                  headers: { 'content-type': 'application/json' },
-                  body: '{}',
-                });
-                if (!response.ok) return;
-                const payload = await response.json().catch(() => null);
-                const namespaces = payload?.value?.namespaces;
-                const view = Array.isArray(namespaces) ? namespaces[0]?.value : null;
-                const list = Array.isArray(view?.channels) ? view.channels : [];
-                const normalized = list
-                  .map((channel) => ({
-                    id: String(channel?.id ?? ''),
-                    name: String(channel?.name ?? channel?.label ?? channel?.id ?? ''),
-                    models: (Array.isArray(channel?.models) ? channel.models : [])
-                      .map((entry) => (typeof entry === 'string' ? entry.trim() : String(entry?.id ?? entry?.name ?? '').trim()))
-                      .filter(Boolean),
-                  }))
-                  .filter((channel) => channel.id !== '' && channel.models.length > 0);
-                if (!alive || normalized.length === 0) return;
+                const normalized = await loadImageChannels();
+                if (!alive) return;
+                const live = (normalized || []).filter((channel) => channel.models.length > 0);
+                // 读不到设置（宿主重启中、页面还是旧 token）就先拿上次的列表，别显示成「还没配置」。
+                const usable = live.length > 0 ? live : readChannelCache().filter((channel) => channel.models.length > 0);
+                if (usable.length === 0) return;
+                setChannelStale(live.length === 0);
                 const saved = readStore();
                 const savedChannelId = typeof saved.imageChannelId === 'string' && saved.imageChannelId
                   ? saved.imageChannelId
                   : String(saved.source || '').startsWith('host:') ? String(saved.source).slice(5) : '';
-                const channel = normalized.find((item) => item.id === savedChannelId) ?? normalized[0];
+                const channel = usable.find((item) => item.id === savedChannelId) ?? usable[0];
                 const wanted = typeof saved.imageModel === 'string' ? saved.imageModel : '';
-                setImageChannels(normalized);
+                setImageChannels(usable);
                 setImageChannelId(channel.id);
                 setImageModel(channel.models.includes(wanted) ? wanted : channel.models[0]);
                 void probeModelsRef.current(channel.id);
               } catch {
-                /* 没装 imagegen，或当前会话读不到设置：这一块就不显示 */
+                if (!alive) return;
+                const cached = readChannelCache().filter((channel) => channel.models.length > 0);
+                if (cached.length === 0) return;
+                setChannelStale(true);
+                const saved = readStore();
+                const savedChannelId = typeof saved.imageChannelId === 'string' && saved.imageChannelId
+                  ? saved.imageChannelId
+                  : String(saved.source || '').startsWith('host:') ? String(saved.source).slice(5) : '';
+                const channel = cached.find((item) => item.id === savedChannelId) ?? cached[0];
+                const wanted = typeof saved.imageModel === 'string' ? saved.imageModel : '';
+                setImageChannels(cached);
+                setImageChannelId(channel.id);
+                setImageModel(channel.models.includes(wanted) ? wanted : channel.models[0]);
               }
             })();
             return () => {
               alive = false;
             };
-          }, []);
+          }, [loadImageChannels]);
+
+          // 删掉一个宿主渠道：重新读 revision → unset 该下标 → 冲突就重读重试一次。
+          const removeHostChannel = async (channelId) => {
+            const current = imageChannels.find((item) => item.id === channelId);
+            if (!current) return;
+            if (!window.confirm(`${t('channelDeleteAsk')}\n\n${current.name}`)) return;
+            setTargetBad(false);
+            setTargetMsg('');
+            try {
+              let removed = false;
+              for (let attempt = 0; attempt < 2 && !removed; attempt += 1) {
+                const normalized = await loadImageChannels();
+                if (!normalized) break;
+                const index = normalized.findIndex((item) => item.id === channelId);
+                if (index < 0) {
+                  removed = true;
+                  break;
+                }
+                const body = { ns: imageChannelNamespace.current, ops: [{ op: 'unset', path: ['channels', index] }] };
+                if (typeof imageChannelRevision.current === 'number') body.expectedRevision = imageChannelRevision.current;
+                const response = await fetch(`${API}/image-channels/mutate`, {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify(body),
+                });
+                const result = await response.json().catch(() => null);
+                if (result?.ok) {
+                  removed = true;
+                  break;
+                }
+                if (result?.code !== 'settings-conflict') {
+                  setTargetBad(true);
+                  setTargetMsg(String(result?.message || t('channelDeleteFail')));
+                  return;
+                }
+              }
+              if (!removed) {
+                setTargetBad(true);
+                setTargetMsg(t('channelDeleteFail'));
+                return;
+              }
+              const after = (await loadImageChannels()) || [];
+              const usable = after.filter((channel) => channel.models.length > 0);
+              setChannelStale(false);
+              setImageChannels(usable);
+              const next = usable[0];
+              if (next) {
+                setSource(`host:${next.id}`);
+                setImageChannelId(next.id);
+                setImageModel(next.models[0]);
+                writeStore({ source: `host:${next.id}`, imageChannelId: next.id, imageModel: next.models[0] });
+                void probeModelsRef.current(next.id);
+              } else {
+                setSource('');
+                setImageChannelId('');
+                setImageModel('');
+                writeStore({ source: '', imageChannelId: '', imageModel: '' });
+              }
+              setTargetMsg(t('channelDeleted'));
+            } catch (failure) {
+              setTargetBad(true);
+              setTargetMsg(String(failure?.message || failure));
+            }
+          };
+
+          // 改宿主渠道的名字与端点：同样带 revision 写回，冲突重读重试一次。
+          const updateHostChannel = async (channelId, draft) => {
+            const name = String(draft?.name || '').trim().slice(0, 60);
+            const apiUrl = String(draft?.apiUrl || '').trim().replace(/\/+$/, '').slice(0, 400);
+            if (!/^https?:\/\/\S+$/i.test(apiUrl)) {
+              setTargetBad(true);
+              setTargetMsg(t('channelNeedUrl'));
+              return;
+            }
+            setTargetBad(false);
+            setTargetMsg('');
+            try {
+              let saved = false;
+              for (let attempt = 0; attempt < 2 && !saved; attempt += 1) {
+                const normalized = await loadImageChannels();
+                if (!normalized) break;
+                const index = normalized.findIndex((item) => item.id === channelId);
+                if (index < 0) break;
+                const ops = [];
+                if (name) ops.push({ op: 'set', path: ['channels', index, 'name'], value: name });
+                ops.push({ op: 'set', path: ['channels', index, 'apiUrl'], value: apiUrl });
+                const body = { ns: imageChannelNamespace.current, ops };
+                if (typeof imageChannelRevision.current === 'number') body.expectedRevision = imageChannelRevision.current;
+                const response = await fetch(`${API}/image-channels/mutate`, {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify(body),
+                });
+                const result = await response.json().catch(() => null);
+                if (result?.ok) {
+                  saved = true;
+                  break;
+                }
+                if (result?.code !== 'settings-conflict') {
+                  setTargetBad(true);
+                  setTargetMsg(String(result?.message || t('channelSaveFail')));
+                  return;
+                }
+              }
+              if (!saved) {
+                setTargetBad(true);
+                setTargetMsg(t('channelSaveFail'));
+                return;
+              }
+              const after = (await loadImageChannels()) || [];
+              setChannelStale(false);
+              setImageChannels(after.filter((channel) => channel.models.length > 0));
+              setChannelEdit(null);
+              setTargetMsg(t('channelSaved'));
+            } catch (failure) {
+              setTargetBad(true);
+              setTargetMsg(String(failure?.message || failure));
+            }
+          };
+
+          // 自建端点走插件自己的 targets 接口，按 id 覆盖保存。
+          const updateCustomTarget = async (targetId, draft) => {
+            const current = targets.find((item) => item.id === targetId);
+            if (!current) return;
+            const name = String(draft?.name || '').trim().slice(0, 60) || current.label;
+            const apiUrl = String(draft?.apiUrl || '').trim().replace(/\/+$/, '').slice(0, 400);
+            if (!/^https?:\/\/\S+$/i.test(apiUrl)) {
+              setTargetBad(true);
+              setTargetMsg(t('channelNeedUrl'));
+              return;
+            }
+            setChannelBusy(true);
+            setTargetBad(false);
+            setTargetMsg('');
+            try {
+              const body = await callTargets({
+                action: 'save',
+                target: { id: targetId, label: name, baseUrl: apiUrl, models: current.models || [] },
+              });
+              if (!body?.ok) {
+                setTargetBad(true);
+                setTargetMsg(body?.message || t('channelSaveFail'));
+                return;
+              }
+              setChannelEdit(null);
+              setTargetMsg(t('channelSaved'));
+            } catch (error) {
+              setTargetBad(true);
+              setTargetMsg(String(error?.message || error));
+            } finally {
+              setChannelBusy(false);
+            }
+          };
 
           const callTargets = async (payload) => {
             const response = await fetch(`${API}/targets`, {
@@ -2824,6 +3447,33 @@ window.__ModuleLoader__.load({
               setTargetMsg(String(error?.message || error));
             } finally {
               setTargetBusy(false);
+            }
+          };
+
+          // 内置 Muse 通道：登录/检查/关闭都由服务端拉起浏览器，这里只发动作。
+          const museAction = async (action) => {
+            if (museBusy) return;
+            setMuseBusy(true);
+            setMuseMsg('');
+            try {
+              const response = await fetch(`${API}/muse`, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ action, waitSeconds: 10 }),
+              });
+              const body = await response.json().catch(() => null);
+              if (!body?.ok) {
+                setMuseMsg(body?.message || '内置 Muse 通道没有响应');
+                return;
+              }
+              if (action === 'login') setMuseMsg(body.message || (body.signedIn ? '已登录' : '窗口已打开，登录完再点一次「检查登录」'));
+              else if (action === 'close') setMuseMsg('浏览器已关闭，登录态保留');
+              else if (action === 'signout') setMuseMsg('登录态已清除，下次出图要重新登录');
+              else setMuseMsg(body.signedIn === true ? '已登录' : body.signedIn === false ? '未登录，点「登录 Muse」' : '浏览器未启动，首次出图会自动拉起');
+            } catch (failure) {
+              setMuseMsg(String(failure?.message || failure));
+            } finally {
+              setMuseBusy(false);
             }
           };
 
@@ -2960,6 +3610,30 @@ window.__ModuleLoader__.load({
             }
           };
 
+          const rememberImage = useCallback((payload) => {
+            const entry = {
+              id: payload.id || `image-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+              kind: 'image',
+              at: Date.now(),
+              title: (payload.prompt || '').slice(0, 80) || t('imageHistory'),
+              prompt: (payload.prompt || '').slice(0, 6000),
+              thumbnail: payload.thumbnail || '',
+              originalStored: payload.originalStored === true,
+              model: payload.model || '',
+              imageSize: payload.imageSize || 'auto',
+              imageQuality: payload.imageQuality || 'auto',
+              imageChannelId: payload.imageChannelId || '',
+              source: payload.source || 'host',
+            };
+            setHistory((previous) => {
+              const next = [entry, ...previous].slice(0, HISTORY_LIMIT);
+              const retained = new Set(next.map((item) => item.id));
+              previous.filter((item) => item.kind === 'image' && item.id && !retained.has(item.id)).forEach((item) => void deleteHistoryImages(item.id));
+              writeStore({ history: next });
+              return next;
+            });
+          }, [t]);
+
           const renderOne = useCallback(async () => {
             // 没优化过也能出图：退回左边的想法，再退回选中的参考条目（名称 + 标签）。
             const fallback = refs
@@ -2979,28 +3653,33 @@ window.__ModuleLoader__.load({
             setPreviewError('');
             try {
               // 图生图：导入的主图作为 image，附加参考与姿势图作为 images（上限四张）。
-              const gallery = imageTab === 'edit' ? refShots.map((shot) => shot?.data).filter(Boolean).slice(0, 4) : [];
-              if (usePoseRefs && imageTab === 'edit' && refs.length > 0 && gallery.length < 4) {
+              // 姿势图排在前面：主图槽空着时它会被提成主图，模型才真的照着这个姿势画。
+              const extraShots = imageTab === 'edit' ? refShots.map((shot) => shot?.data).filter(Boolean).slice(0, 4) : [];
+              const poseShots = [];
+              if (usePoseRefs && refs.length > 0) {
                 for (const item of refs) {
-                  if (gallery.length >= 4) break;
+                  if (poseShots.length + extraShots.length >= 4) break;
                   if (!item?.imageUrl) continue;
                   const data = await remoteImageToDataUrl(item.imageUrl, 768);
-                  if (data) gallery.push(data);
+                  if (data) poseShots.push(data);
                 }
               }
+              const gallery = [...poseShots, ...extraShots].slice(0, 4);
+              const poseUsed = poseShots.length > 0;
               let primary = imageTab === 'edit' ? imageRef.current?.data || '' : '';
               // 主图槽空着、附加位里却有图时，把第一张提成主图。
               // 不然请求会退化成纯文生图，模型只看到一句「坐姿・抱腿打开」就自由发挥成动漫了。
-              if (!primary && imageTab === 'edit' && gallery.length > 0) primary = gallery.shift();
+              if (!primary && gallery.length > 0) primary = gallery.shift();
               let note = '';
               // 没写想法、也没优化过时，只拿参考名当提示词太单薄，补一句写实约束。
               const bare = !editedPrompt.trim() && !(result && result.prompt) && !idea.trim();
+              const poseNote = poseUsed ? POSE_NOTE[language] || POSE_NOTE.en : '';
               const submit = async (subject, notes) => {
                 const shared = {
                   mode: subject ? 'edit' : 'text',
                   prompt: subject
-                    ? `${notes || EDIT_PREFIX[language] || EDIT_PREFIX.en}${prompt}`
-                    : `${bare ? PHOTO_NOTE[language] || PHOTO_NOTE.en : ''}${prompt}`,
+                    ? `${notes || EDIT_PREFIX[language] || EDIT_PREFIX.en}${poseNote}${prompt}`
+                    : `${bare ? PHOTO_NOTE[language] || PHOTO_NOTE.en : ''}${poseNote}${prompt}`,
                   size:
                     imageSize !== 'auto'
                       ? imageSize
@@ -3065,6 +3744,21 @@ window.__ModuleLoader__.load({
                 .filter((item) => item && typeof item.b64 === 'string' && item.b64)
                 .map((item) => ({ b64: item.b64, mime: item.mime || 'image/png' }));
               if (shots.length === 0) throw new Error(t('previewFailed'));
+              const historyId = `image-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+              const thumbnail = await historyThumbnail(shots[0]);
+              const originalStored = await writeHistoryImages(historyId, shots);
+              rememberImage({
+                id: historyId,
+                prompt,
+                thumbnail,
+                originalStored,
+                model: effectiveImageModel,
+                imageSize: imageSize !== 'auto' ? imageSize : result?.params?.aspect_ratio || 'auto',
+                imageQuality,
+                imageChannelId,
+                source: activeTarget ? activeTarget.id : activeChannel ? `host:${activeChannel.id}` : source,
+                title: prompt,
+              });
               setPreview(shots);
               setPreviewStale(false);
               // 结果在生图页，出完直接把人带过去。
@@ -3080,7 +3774,7 @@ window.__ModuleLoader__.load({
             } finally {
               setGenerating(false);
             }
-          }, [editedPrompt, result, generating, t, activeChannel, activeTarget, effectiveImageModel, imageSize, imageQuality, refShots, usePoseRefs, neutralize, refs, idea, language, imageTab]);
+          }, [editedPrompt, result, generating, t, activeChannel, activeTarget, effectiveImageModel, imageSize, imageQuality, refShots, usePoseRefs, neutralize, refs, idea, language, imageTab, rememberImage, imageChannelId, imageModel, source]);
 
           // 一次生图请求。工坊的 renderOne 里那段逻辑原本是内联的，
           // 画布也要用同一套通道，所以抽成独立入口，renderOne 保持原样不动。
@@ -3195,14 +3889,18 @@ window.__ModuleLoader__.load({
 
           const canvasStore = useCallback((next, id = activeCanvasIdRef.current, stamp = Date.now()) => {
             const current = canvasWorkspaceState.current;
-            const items = current.items.map((item) => item.id === id ? { ...item, state: next, updatedAt: stamp } : item);
+            const prepared = {
+              ...next,
+              nodes: next.nodes.map((node) => node.kind === 'image' ? { ...node, assetRef: canvasAssetKey(id, node.id) } : node),
+            };
+            const items = current.items.map((item) => item.id === id ? { ...item, state: prepared, updatedAt: stamp } : item);
             const workspace = { ...current, activeId: id, items };
             canvasWorkspaceState.current = workspace;
             activeCanvasIdRef.current = id;
-            canvasState.current = next;
+            canvasState.current = prepared;
             setCanvasWorkspace(workspace);
             setActiveCanvasId(id);
-            setCanvas(next);
+            setCanvas(prepared);
           }, []);
 
           // 只把一份快照记进撤销栈（给拖动、缩放这类事先算好结果的操作复用）。
@@ -3255,22 +3953,53 @@ window.__ModuleLoader__.load({
               clearTimeout(canvasPersistTimer.current);
               canvasPersistTimer.current = null;
             }
-            canvasPersistSeq.current += 1;
-            return writeCanvasWorkspace(canvasWorkspaceState.current);
+            const seq = ++canvasPersistSeq.current;
+            if (!canvasHydrated.current) return 'pending';
+            return persistCanvasWorkspace(canvasWorkspaceState.current, () => seq === canvasPersistSeq.current);
           }, []);
           useEffect(() => {
-            if (!canvasTouched.current) {
-              canvasTouched.current = true;
-              return undefined;
-            }
+            const seq = ++canvasHydrateSeq.current;
+            const source = canvasWorkspaceState.current;
+            void (async () => {
+              const saved = await persistCanvasWorkspace(source, () => seq === canvasHydrateSeq.current);
+              if (saved === 'asset') {
+                if (seq === canvasHydrateSeq.current) {
+                  canvasHydrated.current = true;
+                  setCanvasReady(true);
+                  setCanvasMsg({ text: t('canvasAssetSaveFailed'), bad: true });
+                }
+                return;
+              }
+              const hydrated = await hydrateCanvasWorkspace(source);
+              if (seq !== canvasHydrateSeq.current) return;
+              await pruneCanvasAssets(hydrated);
+              if (seq !== canvasHydrateSeq.current) return;
+              canvasWorkspaceState.current = hydrated;
+              const active = hydrated.items.find((item) => item.id === hydrated.activeId) || hydrated.items[0];
+              activeCanvasIdRef.current = active.id;
+              canvasState.current = active.state;
+              canvasHydrated.current = true;
+              setCanvasWorkspace(hydrated);
+              setActiveCanvasId(active.id);
+              setCanvas(active.state);
+              setCanvasReady(true);
+              if (saved === 'full') setCanvasMsg({ text: t('canvasFull'), bad: true });
+            })();
+            return () => {
+              canvasHydrateSeq.current += 1;
+            };
+          }, []);
+          useEffect(() => {
+            if (!canvasHydrated.current) return undefined;
             const seq = ++canvasPersistSeq.current;
             if (canvasPersistTimer.current) clearTimeout(canvasPersistTimer.current);
-            canvasPersistTimer.current = setTimeout(() => {
+            canvasPersistTimer.current = setTimeout(async () => {
               canvasPersistTimer.current = null;
               if (seq !== canvasPersistSeq.current) return;
-              const warn = writeCanvasWorkspace(canvasWorkspaceState.current);
-              if (warn === 'quota') setCanvasMsg({ text: t('canvasQuota'), bad: true });
+              const warn = await persistCanvasWorkspace(canvasWorkspaceState.current, () => seq === canvasPersistSeq.current);
+              if (warn === 'asset') setCanvasMsg({ text: t('canvasAssetSaveFailed'), bad: true });
               else if (warn === 'full') setCanvasMsg({ text: t('canvasFull'), bad: true });
+              else if (!warn && seq === canvasPersistSeq.current) void pruneCanvasAssets(() => canvasWorkspaceState.current);
             }, 400);
             return () => {
               if (canvasPersistTimer.current) {
@@ -3278,7 +4007,6 @@ window.__ModuleLoader__.load({
                 canvasPersistTimer.current = null;
               }
             };
-            // t 每次渲染都是新的 bind 结果，放进依赖会让这个定时器被反复重置。
           }, [canvasWorkspace]);
 
           // React 的 onWheel 是 passive 监听，preventDefault 会被忽略，只能自己挂。
@@ -3893,8 +4621,36 @@ window.__ModuleLoader__.load({
             [describeFile],
           );
 
+          const historyRestoreSeq = useRef(0);
           const restore = useCallback(
-            (entry) => {
+            async (entry) => {
+              const restoreSeq = ++historyRestoreSeq.current;
+              if (entry?.kind === 'image') {
+                setPage('image');
+                setImageTab('text');
+                setEditedPrompt(entry.prompt || '');
+                setIdea(entry.prompt || '');
+                setImageSize(entry.imageSize || 'auto');
+                setImageQuality(entry.imageQuality || 'auto');
+                setImageChannelId(entry.imageChannelId || '');
+                setImageModel(entry.model || '');
+                setSource(entry.source || 'host');
+                const original = entry.originalStored ? await readHistoryImages(entry.id) : null;
+                if (restoreSeq !== historyRestoreSeq.current) return;
+                if (Array.isArray(original) && original.length > 0) {
+                  setPreview(original);
+                  setPreviewError('');
+                  setPreviewStale(false);
+                  setResult(null);
+                  return;
+                }
+                const thumbnailMatch = /^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=]+)$/i.exec(entry.thumbnail || '');
+                setPreview(thumbnailMatch ? [{ b64: thumbnailMatch[2], mime: thumbnailMatch[1] }] : []);
+                setPreviewError('');
+                setPreviewStale(false);
+                setResult(null);
+                return;
+              }
               setResult({
                 ok: true,
                 title: entry.title,
@@ -3939,29 +4695,62 @@ window.__ModuleLoader__.load({
             setMode('refine');
           }, [result]);
 
+          const removeHistoryEntry = useCallback((id) => {
+            historyRestoreSeq.current += 1;
+            void deleteHistoryImages(id);
+            setHistory((previous) => {
+              const next = previous.filter((entry) => entry.id !== id);
+              writeStore({ history: next });
+              return next;
+            });
+          }, []);
+
           const clearHistory = useCallback(() => {
+            historyRestoreSeq.current += 1;
+            void clearHistoryImages();
             setHistory([]);
             writeStore({ history: [] });
           }, []);
 
           const switchCanvas = useCallback((id) => {
-            const target = canvasWorkspaceState.current.items.find((item) => item.id === id);
+            if (!canvasReady) return;
+            const current = canvasWorkspaceState.current;
+            const target = current.items.find((item) => item.id === id);
             if (!target || target.id === activeCanvasIdRef.current) return;
-            flushCanvasWorkspace();
+            const seq = ++canvasHydrateSeq.current;
             canvasRequestSeq.current += 1;
-            canvasWorkspaceState.current = { ...canvasWorkspaceState.current, activeId: target.id };
-            activeCanvasIdRef.current = target.id;
-            canvasState.current = target.state;
-            setCanvasWorkspace(canvasWorkspaceState.current);
-            setActiveCanvasId(target.id);
-            setCanvas(target.state);
+            setCanvasReady(false);
+            setCanvasBusy('');
+            setCanvasSel([]);
+            setCanvasMsg({ text: '', bad: false });
             canvasHist.current = { past: [], future: [] };
             setCanvasDepth({ undo: 0, redo: 0 });
-            setCanvasSel([]);
-            setCanvasBusy('');
-            setCanvasMsg({ text: '', bad: false });
-            flushCanvasWorkspace();
-          }, [flushCanvasWorkspace]);
+            canvasHydrateReady.current = (async () => {
+              const flushResult = await flushCanvasWorkspace();
+              if (seq !== canvasHydrateSeq.current) return;
+              if (flushResult === 'asset') {
+                setCanvasMsg({ text: t('canvasAssetSaveFailed'), bad: true });
+                setCanvasReady(true);
+                canvasHydrated.current = true;
+                return;
+              }
+              const workspace = { ...canvasWorkspaceState.current, activeId: target.id };
+              const hydrated = await hydrateCanvasWorkspace(workspace);
+              if (seq !== canvasHydrateSeq.current) return;
+              const next = hydrated.items.find((item) => item.id === target.id) || target;
+              canvasWorkspaceState.current = hydrated;
+              activeCanvasIdRef.current = next.id;
+              canvasState.current = next.state;
+              setCanvasWorkspace(hydrated);
+              setActiveCanvasId(next.id);
+              setCanvas(next.state);
+              canvasHydrated.current = true;
+              setCanvasReady(true);
+              const warn = await persistCanvasWorkspace(hydrated, () => seq === canvasHydrateSeq.current);
+              if (warn === 'asset' && seq === canvasHydrateSeq.current) setCanvasMsg({ text: t('canvasAssetSaveFailed'), bad: true });
+              else if (warn === 'full' && seq === canvasHydrateSeq.current) setCanvasMsg({ text: t('canvasFull'), bad: true });
+            })();
+          }, [canvasReady, flushCanvasWorkspace, t]);
 
           const renameCanvas = useCallback((id, value) => {
             const current = canvasWorkspaceState.current;
@@ -4011,7 +4800,10 @@ window.__ModuleLoader__.load({
             setCanvasDepth({ undo: 0, redo: 0 });
             setCanvasSel([]);
             setCanvasMsg({ text: '', bad: false });
-            flushCanvasWorkspace();
+            void flushCanvasWorkspace().then((saved) => {
+              if (saved === 'asset' || saved === 'full') return;
+              return pruneCanvasAssets(canvasWorkspaceState.current);
+            });
           }, [flushCanvasWorkspace, t]);
 
           const newCanvas = useCallback(() => {
@@ -4749,6 +5541,7 @@ window.__ModuleLoader__.load({
                 'div',
                 null,
                 h('label', { className: 'dpf-label', htmlFor: 'dpf-image-source' }, t('imageSource')),
+                channelStale ? h('span', { className: 'dpf-channel-stale' }, t('channelStale')) : null,
                 h(
                   'div',
                   { style: { display: 'flex', gap: 6, alignItems: 'center' } },
@@ -4780,10 +5573,28 @@ window.__ModuleLoader__.load({
                     'button',
                     {
                       type: 'button',
+                      className: 'dpf-icon-btn dpf-channel-manage',
+                      title: t('channelManageHint'),
+                      'aria-label': t('channelManage'),
+                      'aria-expanded': channelPanel ? 'true' : 'false',
+                      onClick: () => {
+                        setChannelPanel((value) => !value);
+                        setTargetOpen(false);
+                        setTargetMsg('');
+                        setTargetBad(false);
+                      },
+                    },
+                    channelPanel ? '×' : '−',
+                  ),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
                       className: 'dpf-icon-btn',
                       title: t('targetAdd'),
                       onClick: () => {
                         setTargetOpen((value) => !value);
+                        setChannelPanel(false);
                         setTargetMsg('');
                       },
                     },
@@ -4810,6 +5621,202 @@ window.__ModuleLoader__.load({
                 ),
               ),
             ),
+            channelPanel &&
+              h(
+                'div',
+                { className: 'dpf-target-form dpf-channel-list' },
+                h('div', { className: 'dpf-channel-head' }, t('channelManage')),
+                imageChannels.length === 0 && targets.length === 0
+                  ? h('div', { className: 'dpf-target-msg' }, t('channelEmpty'))
+                  : null,
+                imageChannels.map((item) =>
+                  channelEdit && channelEdit.kind === 'host' && channelEdit.id === item.id
+                    ? h(
+                        'div',
+                        { key: `host:${item.id}`, className: 'dpf-channel-row dpf-channel-editing' },
+                        h('input', {
+                          className: 'dpf-input dpf-channel-input',
+                          value: channelEdit.name,
+                          placeholder: t('channelEditName'),
+                          maxLength: 60,
+                          'aria-label': t('channelEditName'),
+                          onChange: (event) => setChannelEdit({ ...channelEdit, name: event.target.value }),
+                        }),
+                        h('input', {
+                          className: 'dpf-input dpf-channel-input',
+                          value: channelEdit.apiUrl,
+                          placeholder: 'https://api.example.com/v1',
+                          spellCheck: false,
+                          'aria-label': t('channelEditUrl'),
+                          onChange: (event) => setChannelEdit({ ...channelEdit, apiUrl: event.target.value }),
+                        }),
+                        h(
+                          'div',
+                          { className: 'dpf-channel-actions' },
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              className: 'dpf-btn dpf-btn-small dpf-channel-save',
+                              disabled: channelBusy,
+                              onClick: () => void updateHostChannel(item.id, channelEdit),
+                            },
+                            t('channelSave'),
+                          ),
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              className: 'dpf-btn dpf-btn-small dpf-channel-cancel',
+                              onClick: () => setChannelEdit(null),
+                            },
+                            t('channelCancel'),
+                          ),
+                        ),
+                      )
+                    : h(
+                        'div',
+                        { key: `host:${item.id}`, className: 'dpf-channel-row' },
+                        h('span', { className: 'dpf-channel-name', title: `${item.name} · ${item.apiUrl || ''}` }, `${t('sourceHost')} · ${item.name}`),
+                        h('span', { className: 'dpf-channel-meta' }, `${item.models.length} ${t('channelModels')}`),
+                        h(
+                          'button',
+                          {
+                            type: 'button',
+                            className: 'dpf-icon-btn dpf-channel-edit',
+                            title: t('channelEditHint'),
+                            'aria-label': `${t('channelEdit')} ${item.name}`,
+                            onClick: () => {
+                              setChannelEdit({ kind: 'host', id: item.id, name: item.name, apiUrl: item.apiUrl || '' });
+                              setTargetMsg('');
+                              setTargetBad(false);
+                            },
+                          },
+                          '✎',
+                        ),
+                        h(
+                          'button',
+                          {
+                            type: 'button',
+                            className: 'dpf-icon-btn dpf-channel-del',
+                            title: t('channelDelete'),
+                            'aria-label': `${t('channelDelete')} ${item.name}`,
+                            onClick: () => void removeHostChannel(item.id),
+                          },
+                          '×',
+                        ),
+                      ),
+                ),
+                targets.map((item) =>
+                  channelEdit && channelEdit.kind === 'target' && channelEdit.id === item.id
+                    ? h(
+                        'div',
+                        { key: item.id, className: 'dpf-channel-row dpf-channel-editing' },
+                        h('input', {
+                          className: 'dpf-input dpf-channel-input',
+                          value: channelEdit.name,
+                          placeholder: t('channelEditName'),
+                          maxLength: 60,
+                          'aria-label': t('channelEditName'),
+                          onChange: (event) => setChannelEdit({ ...channelEdit, name: event.target.value }),
+                        }),
+                        h('input', {
+                          className: 'dpf-input dpf-channel-input',
+                          value: channelEdit.apiUrl,
+                          placeholder: 'https://api.example.com/v1',
+                          spellCheck: false,
+                          'aria-label': t('channelEditUrl'),
+                          onChange: (event) => setChannelEdit({ ...channelEdit, apiUrl: event.target.value }),
+                        }),
+                        h(
+                          'div',
+                          { className: 'dpf-channel-actions' },
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              className: 'dpf-btn dpf-btn-small dpf-channel-save',
+                              disabled: channelBusy,
+                              onClick: () => void updateCustomTarget(item.id, channelEdit),
+                            },
+                            t('channelSave'),
+                          ),
+                          h(
+                            'button',
+                            {
+                              type: 'button',
+                              className: 'dpf-btn dpf-btn-small dpf-channel-cancel',
+                              onClick: () => setChannelEdit(null),
+                            },
+                            t('channelCancel'),
+                          ),
+                        ),
+                      )
+                    : h(
+                        'div',
+                        { key: item.id, className: 'dpf-channel-row' },
+                        h('span', { className: 'dpf-channel-name', title: `${item.label} · ${item.baseUrl || ''}` }, item.label),
+                        h('span', { className: 'dpf-channel-meta' }, item.builtin ? '内置 · 浏览器出图' : `${(item.models || []).length} ${t('channelModels')}`),
+                        item.builtin
+                          ? h(
+                              'div',
+                              { className: 'dpf-channel-actions' },
+                              h(
+                                'button',
+                                {
+                                  type: 'button',
+                                  className: 'dpf-btn dpf-btn-small',
+                                  disabled: museBusy,
+                                  onClick: () => void museAction('login'),
+                                },
+                                '登录 Muse',
+                              ),
+                              h(
+                                'button',
+                                {
+                                  type: 'button',
+                                  className: 'dpf-btn dpf-btn-small',
+                                  disabled: museBusy,
+                                  onClick: () => void museAction('status'),
+                                },
+                                '检查登录',
+                              ),
+                            )
+                          : h(
+                              'button',
+                              {
+                                type: 'button',
+                                className: 'dpf-icon-btn dpf-channel-edit',
+                                title: t('channelEditHint'),
+                                'aria-label': `${t('channelEdit')} ${item.label}`,
+                                onClick: () => {
+                                  setChannelEdit({ kind: 'target', id: item.id, name: item.label, apiUrl: item.baseUrl || '' });
+                                  setTargetMsg('');
+                                  setTargetBad(false);
+                                },
+                              },
+                              '✎',
+                            ),
+                        item.builtin
+                          ? null
+                          : h(
+                              'button',
+                              {
+                                type: 'button',
+                                className: 'dpf-icon-btn dpf-channel-del',
+                                title: t('targetRemove'),
+                                'aria-label': `${t('targetRemove')} ${item.label}`,
+                                onClick: () => void removeTarget(item.id),
+                              },
+                              '×',
+                            ),
+                      ),
+                ),
+                museMsg ? h('div', { className: 'dpf-target-msg', role: 'status' }, museMsg) : null,
+                targetMsg
+                  ? h('div', { className: `dpf-target-msg${targetBad ? ' is-bad' : ''}`, role: targetBad ? 'alert' : 'status' }, targetMsg)
+                  : null,
+              ),
             targetOpen &&
               h(
                 'div',
@@ -4985,9 +5992,11 @@ window.__ModuleLoader__.load({
             {
               className: 'dpf-canvas',
               ref: canvasRef,
-              tabIndex: 0,
+              tabIndex: canvasReady ? 0 : -1,
+              'aria-busy': canvasReady ? undefined : 'true',
               'data-panning': canvasPan.current ? '1' : undefined,
               onPointerDownCapture: (event) => {
+                if (!canvasReady) { event.stopPropagation(); return; }
                 // 点到画布本体时把焦点拿过来，键盘快捷键与粘贴才知道往这儿走；
                 // 点到文字的输入框就别抢，否则没法打字。
                 const tag = event.target && event.target.tagName;
@@ -5011,6 +6020,7 @@ window.__ModuleLoader__.load({
               onPointerUp: canvasPanEnd,
               onPointerCancel: canvasPanEnd,
               onDoubleClick: (event) => {
+                if (!canvasReady) return;
                 const target = event.target;
                 if (target === event.currentTarget || (target && target.classList && target.classList.contains('dpf-canvas-layer'))) {
                   commitCanvas((prev) => ({ ...prev, view: { x: 0, y: 0, scale: 1 } }));
@@ -5019,10 +6029,12 @@ window.__ModuleLoader__.load({
               onDragOver: (event) => event.preventDefault(),
               onDrop: (event) => {
                 event.preventDefault();
+                if (!canvasReady) return;
                 const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
                 if (file) void canvasLoadFile(file);
               },
               onKeyDown: (event) => {
+                if (!canvasReady) return;
                 // 光标在画布文本节点或任何输入框里时，Delete/Backspace 是删字，不是删节点。
                 const tag = event.target && event.target.tagName;
                 if (tag === 'TEXTAREA' || tag === 'INPUT') return;
@@ -5050,9 +6062,8 @@ window.__ModuleLoader__.load({
                   return;
                 }
                 if (mod && key === 'v') {
-                  // 粘贴统一交给 window 上的 paste 监听处理：剪贴板里是图就落到画布，
-                  // 是节点就走粘贴。这里只拦一下别让浏览器把页面当成输入框。
-                  event.preventDefault();
+                  // 保留浏览器默认粘贴动作，让 window 的 paste 监听拿到真实剪贴板数据。
+                  // 画布容器不可编辑，文本不会插入；paste 事件再决定落图或粘贴节点。
                   return;
                 }
                 if (key === 'escape') {
@@ -5067,7 +6078,7 @@ window.__ModuleLoader__.load({
             },
             h(
               'div',
-              { className: 'dpf-canvas-tools' },
+              { className: 'dpf-canvas-tools', style: canvasReady ? undefined : { pointerEvents: 'none', opacity: 0.6 } },
               h(
                 'div',
                 { className: 'dpf-canvas-workspace', 'aria-label': t('canvasWorkspace') },
@@ -5233,6 +6244,16 @@ window.__ModuleLoader__.load({
                   onClick: clearCanvas,
                 },
                 t('canvasClear'),
+              ),
+              h(
+                'button',
+                {
+                  className: 'dpf-btn dpf-btn-small dpf-canvas-full',
+                  type: 'button',
+                  title: canvasFull ? t('canvasFullExit') : t('canvasFull'),
+                  onClick: () => setCanvasFull((value) => !value),
+                },
+                canvasFull ? t('canvasFullExit') : t('canvasFull'),
               ),
             ),
             canvasGalOpen
@@ -5473,6 +6494,7 @@ window.__ModuleLoader__.load({
               }),
             ),
             canvasMsg.text ? h('div', { className: 'dpf-canvas-msg', 'data-bad': canvasMsg.bad ? '1' : undefined, role: canvasMsg.bad ? 'alert' : 'status', 'aria-live': canvasMsg.bad ? 'assertive' : 'polite' }, canvasMsg.text) : null,
+            !canvasReady ? h('div', { className: 'dpf-canvas-loading', role: 'status' }, t('canvasLoading')) : null,
             h(
               'div',
               { className: 'dpf-canvas-foot' },
@@ -5504,11 +6526,11 @@ window.__ModuleLoader__.load({
                 },
             h(
               'section',
-              { className: 'dpf-panel', ref: panelRef, tabIndex: -1, role: 'dialog', 'aria-modal': !embedded, 'aria-label': t('meta.title') },
+              { className: `dpf-panel${canvasFull ? ' dpf-panel-full' : ''}`, ref: panelRef, tabIndex: -1, role: 'dialog', 'aria-modal': !embedded, 'aria-label': t('meta.title') },
               h('style', null, css),
               h(
                 'div',
-                { className: 'dpf-shell' },
+                { className: 'dpf-shell', 'data-canvas': canvasView ? '1' : undefined },
                 h(
                   'aside',
                   { className: 'dpf-rail' },
@@ -5574,10 +6596,16 @@ window.__ModuleLoader__.load({
                     railRows.length
                       ? railRows.map((entry) =>
                           h(
-                            'button',
-                            { key: entry.id, className: 'dpf-rail-item', type: 'button', onClick: () => restore(entry), title: entry.title || t('untitled') },
-                            h('b', null, entry.title || t('untitled')),
-                            h('span', null, `${timeLabel(entry.at)} · ${dialectLabel(entry.dialect)}`),
+                            'div',
+                            { key: entry.id, className: 'dpf-rail-entry' },
+                            h(
+                              'button',
+                              { className: `dpf-rail-item${entry.kind === 'image' ? ' dpf-rail-image-item' : ''}`, type: 'button', onClick: () => restore(entry), title: entry.title || t('untitled') },
+                              entry.thumbnail && h('img', { className: 'dpf-history-thumb', src: entry.thumbnail, alt: '' }),
+                              h('b', null, entry.title || (entry.kind === 'image' ? t('imageHistory') : t('untitled'))),
+                              h('span', null, `${timeLabel(entry.at)} · ${entry.kind === 'image' ? entry.model || t('imageModel') : dialectLabel(entry.dialect)}`),
+                            ),
+                            h('button', { className: 'dpf-history-delete', type: 'button', title: t('deleteHistory'), 'aria-label': `${t('deleteHistory')}: ${entry.title || t('untitled')}`, onClick: (event) => { event.stopPropagation(); removeHistoryEntry(entry.id); } }, '×'),
                           ),
                         )
                       : h('div', { className: 'dpf-rail-empty' }, history.length ? t('historyNoMatch') : t('historyEmpty')),
@@ -5989,15 +7017,21 @@ window.__ModuleLoader__.load({
                                 { className: 'dpf-history' },
                                 history.map((entry) =>
                                   h(
-                                    'button',
-                                    { key: entry.id, className: 'dpf-history-item', type: 'button', onClick: () => restore(entry) },
-                                    h('span', { className: 'dpf-dot', style: entry.id === history[0].id ? undefined : { background: 'transparent' } }),
+                                    'div',
+                                    { key: entry.id, className: 'dpf-history-row' },
                                     h(
-                                      'span',
-                                      { className: 'dpf-history-main' },
-                                      h('span', { className: 'dpf-history-title' }, entry.title || t('untitled')),
-                                      h('span', { className: 'dpf-history-sub' }, `${timeLabel(entry.at)} · ${dialectLabel(entry.dialect)} · ${(entry.prompt || '').length} ${t('chars')}`),
+                                      'button',
+                                      { className: 'dpf-history-item', type: 'button', onClick: () => restore(entry) },
+                                      entry.thumbnail && h('img', { className: 'dpf-history-thumb', src: entry.thumbnail, alt: '' }),
+                                      h('span', { className: 'dpf-dot', style: entry.id === history[0].id ? undefined : { background: 'transparent' } }),
+                                      h(
+                                        'span',
+                                        { className: 'dpf-history-main' },
+                                        h('span', { className: 'dpf-history-title' }, entry.kind === 'image' ? entry.title || t('imageHistory') : entry.title || t('untitled')),
+                                        h('span', { className: 'dpf-history-sub' }, entry.kind === 'image' ? `${timeLabel(entry.at)} · ${entry.model || t('imageModel')} · ${entry.imageSize || 'auto'} · ${(entry.prompt || '').length} ${t('chars')}` : `${timeLabel(entry.at)} · ${dialectLabel(entry.dialect)} · ${(entry.prompt || '').length} ${t('chars')}`),
+                                      ),
                                     ),
+                                    h('button', { className: 'dpf-history-delete', type: 'button', title: t('deleteHistory'), 'aria-label': `${t('deleteHistory')}: ${entry.title || t('untitled')}`, onClick: (event) => { event.stopPropagation(); removeHistoryEntry(entry.id); } }, '×'),
                                   ),
                                 ),
                               ),

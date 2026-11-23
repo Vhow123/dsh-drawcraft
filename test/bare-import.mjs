@@ -8,6 +8,20 @@
 const routes = new Map();
 const tools = new Map();
 
+// 宿主设置的替身：只提供插件用到的那两个方法，够路由注册与调用路径跑通。
+const settingsStub = {
+  describe() {
+    return [
+      {
+        ns: 'imagegen',
+        revision: 3,
+        value: { channels: [{ id: 'demo-channel', name: 'Demo Channel', apiUrl: 'https://demo.example/v1', models: [{ id: 'demo-model', alias: 'demo-model' }] }] },
+      },
+    ];
+  },
+  async mutate() {},
+};
+
 const disposers = [];
 const fakeLlm = {
   async listProviders() {
@@ -53,6 +67,10 @@ const ctx = {
           tools.set(definition.name, definition);
           return () => tools.delete(definition.name);
         },
+      },
+      webServer: ctx.webServer,
+      get(name) {
+        return name === 'settings' ? settingsStub : undefined;
       },
       effect: ctx.effect,
     });

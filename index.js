@@ -41,6 +41,7 @@ import {
   randomGallery,
   searchGallery,
 } from './gallery.js';
+import { MuseProvider } from './lib/muse-provider.js';
 
 export { CATALOG, runDescribe, runOptimize, runPatch } from './engine.js';
 
@@ -391,8 +392,24 @@ function maskKey(key) {
   return `${text.slice(0, 4)}****${text.slice(-4)}`;
 }
 
+/**
+ * 内置的 Muse 通道：不需要地址、不需要密钥，也不需要装第二个插件。
+ *
+ * 它不出现在 `~/.dsh/drawcraft-targets.json` 里——那份文件只放用户自己填的 HTTP 端点，
+ * 内置目标每次读列表时合成，写回时被过滤掉，所以删不掉也改不坏。
+ */
+const BUILTIN_MUSE_TARGET = Object.freeze({
+  id: 'muse',
+  label: 'Muse 免费额度（内置）',
+  kind: 'muse',
+  baseUrl: '',
+  apiKey: '',
+  models: ['muse'],
+});
+
 function normalizeTarget(raw) {
   if (!raw || typeof raw !== 'object') return null;
+  if (raw.kind === 'muse') return { ...BUILTIN_MUSE_TARGET };
   const baseUrl = String(raw.baseUrl || '')
     .trim()
     .replace(/\/+$/, '')
@@ -413,6 +430,7 @@ function normalizeTarget(raw) {
   return {
     id: String(raw.id || slug(raw.label || baseUrl)).slice(0, 40),
     label: String(raw.label || baseUrl).slice(0, 60),
+    kind: 'http',
     baseUrl,
     apiKey: String(raw.apiKey || '').slice(0, 400),
     models,
@@ -424,9 +442,10 @@ async function readTargets() {
     const raw = await readFile(targetsPath(), 'utf8');
     const parsed = JSON.parse(raw);
     const list = Array.isArray(parsed?.targets) ? parsed.targets : [];
-    return list.map(normalizeTarget).filter(Boolean);
+    // 内置通道排在前面，装完插件就能直接用。
+    return [BUILTIN_MUSE_TARGET, ...list.map(normalizeTarget).filter((item) => item && item.kind !== 'muse')];
   } catch {
-    return [];
+    return [{ ...BUILTIN_MUSE_TARGET }];
   }
 }
 
@@ -436,7 +455,10 @@ async function writeTargets(input) {
     const source = typeof input === 'function' ? await input(await readTargets()) : input;
     const next = {
       version: TARGETS_VERSION,
-      targets: source.map(normalizeTarget).filter(Boolean).slice(0, 12),
+      targets: source
+        .map(normalizeTarget)
+        .filter((item) => item && item.kind !== 'muse')
+        .slice(0, 12),
     };
     await mkdir(join(homedir(), '.dsh'), { recursive: true });
     await atomicWriteJson(path, next);
@@ -449,10 +471,12 @@ function publicTarget(target) {
   return {
     id: target.id,
     label: target.label,
+    kind: target.kind === 'muse' ? 'muse' : 'http',
     baseUrl: target.baseUrl,
     models: target.models,
     keyHint: maskKey(target.apiKey),
     hasKey: target.apiKey.trim() !== '',
+    builtin: target.kind === 'muse',
   };
 }
 
@@ -609,7 +633,50 @@ async function imagesFromPayload(payload) {
   return shots;
 }
 
-async function relayRender(target, body) {
+/**
+ * 内置 Muse 通道：把绘语的出图请求翻译成「在 muse.ai 网页里发一次对话」。
+ *
+ * 与 HTTP 端点共用同一套返回形状（{ok, images:[{b64,mime}], model, durationMs}），
+ * 所以面板和 agent 工具都不用区分它是本地浏览器还是远端 API。
+ */
+async function relayRenderMuse(provider, body) {
+  const mode = body.mode === 'edit' ? 'edit' : 'text';
+  const prompt = String(body.prompt || '').slice(0, 8000);
+  if (!prompt) return { ok: false, code: 'bad-request', message: 'prompt is required' };
+  const references = [];
+  if (typeof body.image === 'string' && body.image) references.push(body.image);
+  if (Array.isArray(body.images)) {
+    for (const extra of body.images.slice(0, 4)) {
+      if (typeof extra === 'string' && extra) references.push(extra);
+    }
+  }
+  if (mode === 'edit' && references.length === 0) {
+    return { ok: false, code: 'edit-image-missing', message: '图生图需要一张主图' };
+  }
+  const started = Date.now();
+  try {
+    const result = await provider.generate({ prompt, size: body.size, n: body.n, references });
+    if (!Array.isArray(result.images) || result.images.length === 0) {
+      return { ok: false, code: 'empty', message: 'Muse 没有返回图片', durationMs: Date.now() - started };
+    }
+    return {
+      ok: true,
+      images: result.images.map((shot) => ({ b64: shot.b64, mime: shot.mime })),
+      model: 'muse',
+      durationMs: result.durationMs,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      code: String(error?.code || 'muse-failed'),
+      message: redact(textOf(error?.message || error)),
+      durationMs: Date.now() - started,
+    };
+  }
+}
+
+async function relayRender(target, body, provider) {
+  if (target.kind === 'muse') return relayRenderMuse(provider, body);
   const mode = body.mode === 'edit' ? 'edit' : 'text';
   const prompt = String(body.prompt || '').slice(0, 8000);
   if (!prompt) return { ok: false, code: 'bad-request', message: 'prompt is required' };
@@ -1022,6 +1089,8 @@ async function admitImage(ctx, image) {
 
 export function apply(ctx) {
   const activeRuns = new Map();
+  // 内置 Muse 通道：单账号、串行，浏览器按需拉起，登录态存在自己的 profile 里。
+  const museProvider = new MuseProvider({ log: (message) => trace(`muse: ${message}`) });
   trace(`apply() 被调用，webServer=${typeof ctx?.webServer?.register === 'function'} llm=${typeof ctx?.llm?.stream === 'function'}`);
 
   ctx.effect(() => {
@@ -1192,6 +1261,23 @@ export function apply(ctx) {
               writeJson(res, 200, { ok: false, code: 'target-missing', message: '没有这个目标' });
               return;
             }
+            if (target.kind === 'muse') {
+              // 内置通道没有 /models 可问，能查的只有「浏览器里还登录着吗」。
+              const state = await museProvider.status();
+              writeJson(res, 200, {
+                ok: state.signedIn !== false,
+                status: 200,
+                models: target.models,
+                signedIn: state.signedIn,
+                message:
+                  state.signedIn === true
+                    ? '已登录，可以出图'
+                    : state.signedIn === false
+                      ? 'Muse 会话失效，去「出图模型」里点登录'
+                      : '浏览器未启动，首次出图会自动拉起（需要先登录一次）',
+              });
+              return;
+            }
             const headers = {};
             if (target.apiKey.trim()) headers.authorization = `Bearer ${target.apiKey.trim()}`;
             try {
@@ -1224,8 +1310,37 @@ export function apply(ctx) {
             writeJson(res, 200, { ok: false, code: 'target-missing', message: '这个生图目标不在了，去「出图模型」里重新选一个' });
             return;
           }
-          const result = await relayRender(target, body);
+          const result = await relayRender(target, body, museProvider);
           writeJson(res, 200, result);
+        }),
+      ),
+      ctx.webServer.register(
+        route(`${API}/muse`, async (req, res) => {
+          const body = await readJson(req);
+          const action = String(body.action || 'status');
+          try {
+            if (action === 'status') {
+              const state = await museProvider.status();
+              writeJson(res, 200, { ok: true, ...state, target: publicTarget(BUILTIN_MUSE_TARGET) });
+              return;
+            }
+            if (action === 'login') {
+              const result = await museProvider.login({ waitSeconds: Number(body.waitSeconds) || 10 });
+              writeJson(res, 200, { ok: true, ...result, profile: museProvider.profileDir });
+              return;
+            }
+            if (action === 'close') {
+              writeJson(res, 200, { ok: true, ...(await museProvider.close()) });
+              return;
+            }
+            if (action === 'signout') {
+              writeJson(res, 200, { ok: true, ...(await museProvider.signOut()) });
+              return;
+            }
+            writeJson(res, 200, { ok: false, code: 'bad-action', message: `未知操作 ${action}` });
+          } catch (error) {
+            writeJson(res, 200, { ok: false, code: String(error?.code || 'muse-error'), message: redact(textOf(error)) });
+          }
         }),
       ),
       ctx.webServer.register(
@@ -1244,9 +1359,93 @@ export function apply(ctx) {
     return () => {
       for (const controller of activeRuns.values()) controller.abort(new Error('插件正在重新加载'));
       activeRuns.clear();
+      void museProvider.close().catch(() => {});
       for (const dispose of disposers.reverse()) dispose();
     };
   }, 'drawcraft: routes');
+
+  // 宿主设置里的出图渠道：由服务端代取，浏览器端不必自己认命名空间。
+  // 顺带把各命名空间的渠道数量写进加载日志，界面显示「还没配置」时能直接对上账。
+  ctx.inject(['webServer', 'settings'], (sctx) => {
+    const settings = sctx.get('settings');
+    sctx.effect(() => {
+      const probe = () => {
+        try {
+          const rows = settings.describe({ redactSecrets: true });
+          const detail = rows
+            .map((row) => {
+              const list = Array.isArray(row.value?.channels) ? row.value.channels : [];
+              const names = list
+                .map((channel) => {
+                  const models = Array.isArray(channel?.models) ? channel.models.length : 0;
+                  return `${channel?.name || channel?.id || '?'}(${models})`;
+                })
+                .join(',');
+              const userCount = Array.isArray(row.user?.channels) ? row.user.channels.length : -1;
+              return `${row.ns} rev=${row.revision} channels=${list.length} user=${userCount} [${names || '空'}]`;
+            })
+            .join(' | ');
+          trace(`settings describe -> ${rows.length} ns ${detail}`);
+        } catch (failure) {
+          trace(`settings describe failed: ${failure && failure.message}`);
+        }
+      };
+      const timer = setTimeout(probe, 3000);
+      return () => clearTimeout(timer);
+    }, 'drawcraft: settings probe');
+    sctx.effect(() => {
+      const disposers = [
+        sctx.webServer.register(
+          route(`${API}/image-channels`, async (req, res) => {
+            try {
+              const rows = settings.describe({ redactSecrets: true });
+              const pick = rows.find((row) => row.ns === 'imagegen' || row.ns === 'dsh-imagegen')
+                ?? rows.find((row) => Array.isArray(row?.value?.channels));
+              if (!pick) {
+                writeJson(res, 200, {
+                  ok: false,
+                  code: 'channel-ns-missing',
+                  message: '宿主里没找到 imagegen 的渠道设置',
+                  namespaces: rows.map((row) => row?.ns),
+                });
+                return;
+              }
+              writeJson(res, 200, {
+                ok: true,
+                ns: pick.ns,
+                revision: pick.revision,
+                channels: Array.isArray(pick.value?.channels) ? pick.value.channels : [],
+              });
+            } catch (failure) {
+              writeJson(res, 200, { ok: false, code: 'describe-failed', message: String(failure?.message || failure) });
+            }
+          }),
+        ),
+        sctx.webServer.register(
+          route(`${API}/image-channels/mutate`, async (req, res) => {
+            const body = await readJsonLoose(req);
+            const ns = String(body.ns || 'imagegen');
+            const ops = Array.isArray(body.ops) ? body.ops : [];
+            try {
+              await settings.mutate(
+                ns,
+                ops,
+                typeof body.expectedRevision === 'number' ? body.expectedRevision : undefined,
+              );
+              writeJson(res, 200, { ok: true });
+            } catch (failure) {
+              const message = String(failure?.message || failure);
+              const conflict = failure?.name === 'SettingsConflictError' || message.includes('changed since it was read');
+              writeJson(res, 200, { ok: false, code: conflict ? 'settings-conflict' : 'mutate-failed', message });
+            }
+          }),
+        ),
+      ];
+      return () => {
+        for (const dispose of disposers) dispose();
+      };
+    }, 'drawcraft: image channels');
+  });
 
   ctx.inject(['tools'], (toolCtx) => {
     toolCtx.effect(() => {

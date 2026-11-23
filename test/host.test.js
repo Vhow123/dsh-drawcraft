@@ -35,6 +35,7 @@ let routes;
 let tools;
 let disposers;
 let fakeLlm;
+const mutateCalls = [];
 
 function makeLlm(reply) {
   return {
@@ -104,6 +105,31 @@ before(async () => {
     },
   });
 
+  services.set('settings', {
+    describe() {
+      return [
+        { ns: 'other-plugin', revision: 1, value: { theme: 'light' } },
+        {
+          ns: 'imagegen',
+          revision: 9,
+          value: {
+            channels: [
+              {
+                id: 'chan-a',
+                name: '渠道 A',
+                apiUrl: 'https://a.example/v1',
+                models: [{ id: 'model-a', alias: 'model-a' }],
+              },
+            ],
+          },
+        },
+      ];
+    },
+    async mutate(ns, ops, expectedRevision) {
+      mutateCalls.push({ ns, ops, expectedRevision });
+    },
+  });
+
   const ctx = {
     llm: fakeLlm,
     get: (serviceName) => services.get(serviceName),
@@ -122,6 +148,13 @@ before(async () => {
             return () => tools.delete(tool.name);
           },
         },
+        webServer: {
+          register: (route) => {
+            routes.set(route.path, route);
+            return () => routes.delete(route.path);
+          },
+        },
+        get: (serviceName) => services.get(serviceName),
         effect: (fn, label) => record(label, fn()),
         inject: () => {},
       });
@@ -176,6 +209,8 @@ test('registers every route and all agent tools', { skip }, () => {
     '/api/drawcraft/config',
     '/api/drawcraft/describe',
     '/api/drawcraft/gallery',
+    '/api/drawcraft/image-channels',
+    '/api/drawcraft/image-channels/mutate',
     '/api/drawcraft/optimize',
     '/api/drawcraft/patch',
     '/api/drawcraft/render',
@@ -489,6 +524,30 @@ test('patch refuses to run without an instruction', { skip }, async () => {
   const { body } = await call('/api/drawcraft/patch', { provider: 'demo', model: 'demo-model', prompt: 'something' });
   assert.equal(body.ok, false);
   assert.equal(body.code, 'INSTRUCTION_REQUIRED');
+});
+
+test('image channels proxy picks the imagegen namespace instead of the first one', { skip }, async () => {
+  const { status, body } = await call('/api/drawcraft/image-channels', {});
+  assert.equal(status, 200);
+  assert.equal(body.ok, true);
+  assert.equal(body.ns, 'imagegen');
+  assert.equal(body.revision, 9);
+  assert.equal(body.channels.length, 1);
+  assert.equal(body.channels[0].name, '渠道 A');
+});
+
+test('image channels proxy forwards mutate with the revision it was read at', { skip }, async () => {
+  mutateCalls.length = 0;
+  const { status, body } = await call('/api/drawcraft/image-channels/mutate', {
+    ns: 'imagegen',
+    ops: [{ op: 'unset', path: ['channels', 0] }],
+    expectedRevision: 9,
+  });
+  assert.equal(status, 200);
+  assert.equal(body.ok, true);
+  assert.deepEqual(mutateCalls, [
+    { ns: 'imagegen', ops: [{ op: 'unset', path: ['channels', 0] }], expectedRevision: 9 },
+  ]);
 });
 
 test('disposing the plugin unregisters everything', { skip }, () => {

@@ -50,6 +50,7 @@ const pieces = [
   extractConst(source, 'CANVAS_WORKSPACE_KEY'),
   extractConst(source, 'CANVAS_NAME_LIMIT'),
   extractConst(source, 'DEFAULT_CANVAS_NAME'),
+  extractConst(source, 'CANVAS_ASSET_PREFIX'),
   extractFunction(source, 'histPush'),
   extractFunction(source, 'histUndo'),
   extractFunction(source, 'histRedo'),
@@ -64,6 +65,8 @@ const pieces = [
   extractFunction(source, 'normalizeCanvasWorkspace'),
   extractFunction(source, 'readCanvasWorkspace'),
   extractFunction(source, 'writeCanvasWorkspace'),
+  extractFunction(source, 'canvasAssetKey'),
+  extractFunction(source, 'serializeCanvasWorkspace'),
   extractFunction(source, 'writeCanvas'),
   extractFunction(source, 'chainOrder'),
 ].join('\n');
@@ -80,7 +83,7 @@ function makeStore(initial = {}) {
 
 function load(localStorage) {
   // eslint-disable-next-line no-new-func
-  return new Function('localStorage', `${pieces}\nreturn { readCanvas, writeCanvas, readCanvasWorkspace, writeCanvasWorkspace, normalizeCanvasWorkspace, normalizeCanvasName, histPush, histUndo, histRedo, EMPTY_CANVAS, CANVAS_HISTORY };`)(localStorage);
+  return new Function('localStorage', `${pieces}\nreturn { readCanvas, writeCanvas, readCanvasWorkspace, writeCanvasWorkspace, normalizeCanvasWorkspace, normalizeCanvasName, canvasAssetKey, serializeCanvasWorkspace, histPush, histUndo, histRedo, EMPTY_CANVAS, CANVAS_HISTORY };`)(localStorage);
 }
 
 test('空存储时给出空画布', () => {
@@ -91,27 +94,28 @@ test('空存储时给出空画布', () => {
   assert.equal(state.view.scale, 1);
 });
 
-test('空存储迁移为一张默认画布工作区', () => {
+test('空存储返回默认工作区且由异步初始化负责落盘', () => {
   const store = makeStore();
   const api = load(store);
   const workspace = api.readCanvasWorkspace();
   assert.equal(workspace.items.length, 1);
   assert.equal(workspace.activeId, workspace.items[0].id);
   assert.equal(workspace.items[0].name, '新画布');
-  assert.ok(store.dump()['dsh-drawcraft:canvases:v1']);
+  assert.equal(store.dump()['dsh-drawcraft:canvases:v1'], undefined, '异步资产迁移完成前不提前写索引');
 });
 
-test('旧单画布迁移后保留节点并写入新工作区', () => {
+test('旧单画布读取阶段保留内容且等待 IndexedDB 迁移后再写新索引', () => {
   const store = makeStore({
-    'dsh-drawcraft:canvas:v1': JSON.stringify({ nodes: [{ id: 'cn_old', kind: 'text', x: 0, y: 0, w: 200, h: 100, src: '', text: '旧内容' }], edges: [], view: { x: 4, y: 5, scale: 1 } }),
+    'dsh-drawcraft:canvas:v1': JSON.stringify({ nodes: [{ id: 'cn_old', kind: 'image', x: 0, y: 0, w: 200, h: 100, src: 'data:image/png;base64,AAAA', text: '', title: '旧图' }], edges: [], view: { x: 4, y: 5, scale: 1 } }),
   });
   const api = load(store);
   const workspace = api.readCanvasWorkspace();
-  assert.equal(workspace.items[0].state.nodes[0].text, '旧内容');
-  assert.equal(api.readCanvasWorkspace().items[0].state.view.x, 4);
+  assert.equal(workspace.items[0].state.nodes[0].src, 'data:image/png;base64,AAAA');
+  assert.equal(workspace.items[0].state.view.x, 4);
+  assert.equal(store.dump()['dsh-drawcraft:canvases:v1'], undefined);
 });
 
-test('损坏的新工作区键会回退到旧画布并完成迁移', () => {
+test('损坏的新工作区键会回退到旧画布并等待异步迁移', () => {
   const store = makeStore({
     'dsh-drawcraft:canvases:v1': '{broken',
     'dsh-image-prompt-forge:canvas:v1': JSON.stringify({ nodes: [{ id: 'cn_legacy', kind: 'text', x: 2, y: 3, w: 200, h: 100, src: '', text: '旧键内容' }], edges: [], view: { x: 7, y: 8, scale: 1 } }),
@@ -120,7 +124,7 @@ test('损坏的新工作区键会回退到旧画布并完成迁移', () => {
   const workspace = api.readCanvasWorkspace();
   assert.equal(workspace.items[0].state.nodes[0].text, '旧键内容');
   assert.equal(workspace.items[0].state.view.x, 7);
-  assert.doesNotThrow(() => JSON.parse(store.dump()['dsh-drawcraft:canvases:v1']));
+  assert.equal(store.dump()['dsh-drawcraft:canvases:v1'], '{broken', '回退读取阶段不提前覆盖损坏索引');
 });
 
 test('有效但空的新工作区不会回退并覆盖旧画布', () => {
@@ -132,6 +136,31 @@ test('有效但空的新工作区不会回退并覆盖旧画布', () => {
   const workspace = api.readCanvasWorkspace();
   assert.equal(workspace.items.length, 1);
   assert.equal(workspace.items[0].state.nodes.length, 0);
+});
+
+test('轻量画布索引剥离图片与引用快照，同时保留布局和视口', () => {
+  const api = load(makeStore());
+  const image = 'data:image/png;base64,' + 'A'.repeat(4096);
+  const workspace = api.normalizeCanvasWorkspace({
+    activeId: 'cw_a',
+    items: [{ id: 'cw_a', name: '画布 A', state: {
+      nodes: [
+        { id: 'cn_img', kind: 'image', x: 10, y: 20, w: 300, h: 240, src: image, title: '图片', meta: { referenceSources: [{ id: 'ref1', title: '参考', src: image }] } },
+        { id: 'cn_text', kind: 'text', x: 400, y: 20, w: 200, h: 100, src: '', text: '提示词' },
+      ],
+      edges: [{ id: 'edge1', from: 'cn_img', to: 'cn_text' }],
+      view: { x: 32, y: -16, scale: 1.4 },
+    } }],
+  });
+  const stored = api.serializeCanvasWorkspace(workspace);
+  assert.equal(stored.items[0].state.nodes[0].src, '');
+  assert.equal(stored.items[0].state.nodes[0].assetRef, 'drawcraft-canvas:cw_a:cn_img:image');
+  assert.equal(stored.items[0].state.nodes[0].meta.referenceSources[0].src, '');
+  assert.equal(stored.items[0].state.nodes[0].meta.referenceSources[0].assetRef, 'drawcraft-canvas:cw_a:cn_img:reference-0');
+  assert.equal(stored.items[0].state.nodes[1].text, '提示词');
+  assert.deepEqual(stored.items[0].state.edges, workspace.items[0].state.edges);
+  assert.deepEqual(stored.items[0].state.view, { x: 32, y: -16, scale: 1.4 });
+  assert.ok(JSON.stringify(stored).length < JSON.stringify(workspace).length / 10);
 });
 
 test('多画布写回后可按 activeId 保留并恢复内容', () => {
@@ -148,6 +177,7 @@ test('多画布写回后可按 activeId 保留并恢复内容', () => {
   const back = api.readCanvasWorkspace();
   assert.equal(back.activeId, 'cw_b');
   assert.equal(back.items.find((item) => item.id === 'cw_b').state.nodes[0].text, '保留');
+  assert.equal(back.items.find((item) => item.id === 'cw_a').state.nodes.length, 0);
 });
 
 test('工作区名称会裁剪并且始终保留一张画布', () => {
@@ -223,18 +253,12 @@ test('节点数量超过上限时只留最近的', () => {
   assert.equal(back.nodes[59].id, 'cn_69');
 });
 
-test('多画布连续撞配额时保留所有画布的布局骨架', () => {
-  const store = makeStore();
-  let attempts = 0;
-  const original = store.setItem;
-  store.setItem = (key, value) => {
-    attempts += 1;
-    if (attempts < 3) {
-      const error = new Error('QuotaExceededError');
-      error.name = 'QuotaExceededError';
-      throw error;
-    }
-    original(key, value);
+test('轻量工作区索引写入失败时保留旧索引且返回容量错误', () => {
+  const store = makeStore({ 'dsh-drawcraft:canvases:v1': '{"version":1,"activeId":"old","items":[]}' });
+  store.setItem = () => {
+    const error = new Error('QuotaExceededError');
+    error.name = 'QuotaExceededError';
+    throw error;
   };
   const api = load(store);
   const workspace = api.normalizeCanvasWorkspace({
@@ -244,13 +268,8 @@ test('多画布连续撞配额时保留所有画布的布局骨架', () => {
       { id: 'cw_b', name: '乙', state: { nodes: [{ id: 'cn_b', kind: 'text', x: 3, y: 4, w: 200, h: 100, src: '', text: '保留布局' }], edges: [], view: { x: 3, y: 4, scale: 1 } } },
     ],
   });
-  assert.equal(api.writeCanvasWorkspace(workspace), 'quota');
-  const stored = JSON.parse(store.dump()['dsh-drawcraft:canvases:v1']);
-  assert.deepEqual(stored.items.map((item) => item.id), ['cw_a', 'cw_b']);
-  assert.equal(stored.items[0].state.nodes[0].src, '');
-  assert.equal(stored.items[0].state.nodes[0].x, 1);
-  assert.equal(stored.items[1].state.nodes[0].text, '保留布局');
-  assert.equal(stored.activeId, 'cw_b');
+  assert.equal(api.writeCanvasWorkspace(workspace), 'full');
+  assert.equal(store.dump()['dsh-drawcraft:canvases:v1'], '{"version":1,"activeId":"old","items":[]}');
 });
 
 test('撤销栈压入时清空重做分支', () => {

@@ -1,8 +1,8 @@
 {
   "name": "dsh-drawcraft",
-  "version": "1.11.0",
+  "version": "1.12.0",
   "type": "module",
-  "description": "绘语：把想法拆成可直接执行的生图提示词：六种方言、参考图库（姿势/服装/人像）、粘贴板导入与图生图、无限画布上串起多张图再出图，并支持自带 OpenAI 兼容的生图端点（密钥只存本机）。",
+  "description": "绘语：把想法拆成可直接执行的生图提示词：六种方言、参考图库（姿势/服装/人像）、粘贴板导入与图生图、无限画布上串起多张图再出图，并内置 Muse 免费额度通道（免装第二个插件）、支持自带 OpenAI 兼容的生图端点（密钥只存本机）。",
   "license": "MIT",
   "engines": {
     "node": ">=18"
@@ -25,7 +25,10 @@
     "bring-your-own-endpoint",
     "image-edits",
     "infinite-canvas",
-    "node-canvas"
+    "node-canvas",
+    "muse",
+    "free-quota",
+    "built-in-provider"
   ],
   "repository": {
     "type": "git",
@@ -40,7 +43,8 @@
     "./client": "./client.js",
     "./engine": "./engine.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
-    "./gallery": "./gallery.js"
+    "./gallery": "./gallery.js",
+    "./muse-provider": "./lib/muse-provider.js"
   },
   "dsh": {
     "bundle": {
@@ -67,6 +71,8 @@
     "client.js",
     "engine.js",
     "gallery.js",
+    "lib/",
+    "vendor/",
     "cordis.patch.yml",
     "README.md"
   ]

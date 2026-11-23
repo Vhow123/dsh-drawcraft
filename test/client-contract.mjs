@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('../client.js', import.meta.url), 'utf8');
+const serverSource = readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 
 let bundle = null;
 const registrations = [];
@@ -186,12 +187,12 @@ check('附加参考上限四张', clientSource.includes('previous.length >= 4 ? 
 check('图生图走 edit 模式', clientSource.includes("mode: subject ? 'edit' : 'text'"), 'edit-mode');
 check('主图与参考图分别传 image/images', clientSource.includes('...(subject ? { image: subject } : {})') && clientSource.includes('...(gallery.length > 0 ? { images: gallery } : {})'), 'image/images');
 check('姿势图可转成内联图', clientSource.includes('remoteImageToDataUrl') && clientSource.includes('new File([blob]'), 'toDataUrl');
-check('姿势图条件默认关闭', clientSource.includes('useState(false)') && /\['usePoseRefs'\]|usePoseRefs: '.+'/.test(clientSource), 'usePoseRefs');
+check('选了参考图会自动带上姿势图，并在提示词里点名按姿势画', clientSource.includes('const [usePoseRefs, setUsePoseRefs] = useState(false)') && clientSource.includes('setUsePoseRefs(true)') && clientSource.includes('const POSE_NOTE = {') && clientSource.includes('${poseNote}${prompt}') && clientSource.includes('const poseUsed = poseShots.length > 0'), 'usePoseRefs');
 
 // 深度图去审核：灰度检测 + 等高线线稿 + 被拒重试
 check('被拒后自动转线稿重试', clientSource.includes('contourDataUrl(primary)') && clientSource.includes("neutralize && primary && !note"), 'neutralize');
 check('不再按灰度预判转线稿', !/neutralize && \(await isFlatGray/.test(clientSource), 'no-preconvert');
-check('主图槽空时把附加参考提成主图', clientSource.includes("imageTab === 'edit' && gallery.length > 0) primary = gallery.shift()"), 'promote');
+check('主图槽空时把附加参考提成主图', clientSource.includes('if (!primary && gallery.length > 0) primary = gallery.shift()') && clientSource.includes('const gallery = [...poseShots, ...extraShots].slice(0, 4)'), 'promote');
 check('裸提示词补写实约束', clientSource.includes('PHOTO_NOTE') && clientSource.includes('bare ? PHOTO_NOTE'), 'photo-note');
 check('线稿开关默认开', clientSource.includes('const [neutralize, setNeutralize] = useState(true)'), 'neutralize-state');
 check('被审核拒绝时降级重试一次', clientSource.includes("failure?.code === 'upstream-rejected'"), 'retry');
@@ -213,7 +214,7 @@ check('自定义端点走插件转发', clientSource.includes("activeTarget ? `$
 // 无限画布
 check('画布视图可切换', clientSource.includes("const [page, setPage] = useState('prompt')") && /canvasView\s*\?\s*canvasBody/.test(clientSource), 'canvas-view');
 check('画布状态单独落盘', clientSource.includes('CANVAS_KEY') && clientSource.includes('function writeCanvas('), 'canvas-store');
-check('拖动不逐帧写盘', clientSource.includes('canvasTouched') && /writeCanvasWorkspace\(canvasWorkspaceState\.current\)[\s\S]*?\}, \[canvasWorkspace\]\);/.test(clientSource), 'canvas-debounce');
+check('拖动不逐帧写盘', clientSource.includes('canvasTouched') && clientSource.includes('setTimeout(async () =>') && clientSource.includes('persistCanvasWorkspace(canvasWorkspaceState.current'), 'canvas-debounce');
 check('滚轮是非 passive 监听', clientSource.includes("addEventListener('wheel', onWheel, { passive: false })"), 'canvas-wheel');
 check('节点可拖动与缩放', clientSource.includes('canvasStartDrag') && clientSource.includes(".dpf-canvas-resize"), 'canvas-drag');
 check('空白处拖动平移', clientSource.includes('canvasPanStart') && clientSource.includes('canvasPan.current'), 'canvas-pan');
@@ -246,7 +247,9 @@ check('双击空白复位视图', clientSource.includes('onDoubleClick') && (cli
 check('快捷键提示挂到工具栏', clientSource.includes('(Ctrl+Z)') && clientSource.includes('(Ctrl+Shift+Z)'), 'canvas-keys');
 
 // 画布粘贴：Ctrl+V 直接落图，且不跟图生图的主图槽抢
-check('画布页粘贴的图落到画布', clientSource.includes('canvasPasteRef') && clientSource.includes("pageRef.current === 'canvas' && canvasPasteRef.current"), 'canvas-paste-routing');
+check('画布页粘贴的图落到画布', clientSource.includes('canvasPasteRef') && clientSource.includes("pageRef.current === 'canvas' && canvasReady && canvasPasteRef.current"), 'canvas-paste-routing');
+const canvasPasteKeydown = clientSource.match(/if \(mod && key === 'v'\) \{([\s\S]*?)\n\s*\}/)?.[1] || '';
+check('Ctrl+V 不拦截浏览器 paste 事件', Boolean(canvasPasteKeydown) && !canvasPasteKeydown.includes('preventDefault') && canvasPasteKeydown.includes('window 的 paste 监听'), 'canvas-paste-keydown');
 check('画布能接图链粘贴', clientSource.includes('const canvasPasteLink = useCallback') && clientSource.includes('text/html'), 'canvas-paste-link');
 check('点画布拿回焦点', clientSource.includes('onPointerDownCapture') && clientSource.includes('canvasRef.current?.focus?.()'), 'canvas-focus');
 check('输入框里的粘贴不抢', clientSource.includes("tag === 'TEXTAREA' || tag === 'INPUT'"), 'canvas-paste-typing');
@@ -291,7 +294,7 @@ check(
     clientSource.includes('function readCanvasWorkspace') &&
     clientSource.includes('function writeCanvasWorkspace') &&
     clientSource.includes('const [canvasWorkspace, setCanvasWorkspace]') &&
-    clientSource.includes('writeCanvasWorkspace(canvasWorkspaceState.current)') &&
+    clientSource.includes('persistCanvasWorkspace(canvasWorkspaceState.current') &&
     clientSource.includes('for (const key of [CANVAS_KEY, LEGACY_CANVAS_KEY])'),
   'canvas-workspace-storage',
 );
@@ -304,11 +307,22 @@ check(
   'canvas-workspace-race-guards',
 );
 check(
-  '配额降级保留所有画布布局',
-  clientSource.includes('const layoutItems = workspace.items.map') &&
-    clientSource.includes('不能为了写入当前画布而静默删除其他画布') &&
+  '画布图片先写 IndexedDB，再写轻量 localStorage 索引',
+  clientSource.includes("indexedDB.open(HISTORY_DB_NAME, 2)") &&
+    clientSource.includes("createObjectStore(CANVAS_DB_STORE)") &&
+    clientSource.includes('await canvasAssetWriteQueue') &&
+    clientSource.includes('return writeCanvasWorkspace(workspace);') &&
+    clientSource.includes("return 'asset';") &&
     clientSource.includes("return 'full';"),
-  'canvas-workspace-quota',
+  'canvas-indexeddb-persistence',
+);
+check(
+  '画布恢复期间阻止编辑并隔离切换请求',
+  clientSource.includes("className: 'dpf-canvas-loading'") &&
+    clientSource.includes("'aria-busy': canvasReady ? undefined : 'true'") &&
+    clientSource.includes('const flushResult = await flushCanvasWorkspace()') &&
+    clientSource.includes('seq !== canvasHydrateSeq.current'),
+  'canvas-hydration-gates',
 );
 check('画布有自己的一套参考库 state', clientSource.includes('const [canvasGalOpen, setCanvasGalOpen]') && clientSource.includes('const [canvasGalWorks, setCanvasGalWorks]'), 'canvas-gallery-state');
 check('画布有参考库面板', clientSource.includes("className: 'dpf-canvas-gal'") && clientSource.includes('dpf-canvas-gal-grid'), 'canvas-gallery-panel');
@@ -387,6 +401,8 @@ check(
   'workshop-opaque-retry',
 );
 
+check('画布页收起左栏历史，画布占满面板', clientSource.includes('.dpf-shell[data-canvas="1"] .dpf-rail{width:74px') && clientSource.includes("'data-canvas': canvasView ? '1' : undefined"), 'canvas-full-bleed');
+check('画布可全屏撑满视口并可退出', clientSource.includes('dpf-panel-full{position:fixed;inset:0;width:100vw;height:100vh') && clientSource.includes("canvasFull ? t('canvasFullExit') : t('canvasFull')"), 'canvas-fullscreen');
 check('插件整体采用白色主题', clientSource.includes('.dpf-panel{--dsw-alias-bg-primary:#fff') && clientSource.includes('.dpf-canvas{background-color:#f8fafc') && clientSource.includes('color-scheme:light'), 'light-theme');
 check('多画布列表控件可操作', clientSource.includes('.dpf-canvas-workspace') && clientSource.includes('dpf-canvas-workspace-select') && clientSource.includes("t('canvasRename')") && clientSource.includes("t('canvasDelete')"), 'canvas-workspace-ui');
 check(
@@ -439,6 +455,98 @@ check(
   clientSource.includes('nav[class*=\"panelList\"] button:has([data-dsh-panel-entry=\"dsh-drawcraft\"]){display:none}') &&
     clientSource.includes('[data-sidebar-collapsed] [data-drawcraft-tab]{display:none}'),
   'sidebar-tab-dedupe',
+);
+check(
+  '成功生图保存轻量图片历史与参数',
+  clientSource.includes("kind: 'image'") &&
+    clientSource.includes('await historyThumbnail(shots[0])') &&
+    clientSource.includes('await writeHistoryImages(historyId, shots)') &&
+    clientSource.includes('rememberImage({') &&
+    clientSource.includes('imageSize: imageSize !== \'auto\'') &&
+    clientSource.includes("writeStore({ history: next })"),
+  'image-history-write',
+);
+check(
+  '图片历史可恢复生图预览并显示缩略图',
+  clientSource.includes("if (entry?.kind === 'image')") &&
+    clientSource.includes('entry.originalStored ? await readHistoryImages(entry.id) : null') &&
+    clientSource.includes('if (restoreSeq !== historyRestoreSeq.current) return;') &&
+    clientSource.includes('setPreview(original);') &&
+    clientSource.includes('setPreview(thumbnailMatch ?') &&
+    clientSource.includes("className: 'dpf-history-thumb'") &&
+    clientSource.includes("setPage('image')"),
+  'image-history-restore',
+);
+check(
+  '每条历史都有独立删除按钮且不触发恢复',
+  clientSource.includes('const removeHistoryEntry = useCallback((id)') &&
+    clientSource.includes('previous.filter((entry) => entry.id !== id)') &&
+    clientSource.includes('void deleteHistoryImages(id);') &&
+    clientSource.includes('void clearHistoryImages();') &&
+    clientSource.includes("className: 'dpf-rail-entry'") &&
+    clientSource.includes("className: 'dpf-history-row'") &&
+    (clientSource.match(/className: 'dpf-history-delete'/g) || []).length === 2 &&
+    clientSource.includes('event.stopPropagation(); removeHistoryEntry(entry.id);') &&
+    clientSource.includes("deleteHistory: '删除记录'") &&
+    clientSource.includes("deleteHistory: 'Delete history entry'"),
+  'history-entry-delete',
+);
+check(
+  '出图渠道可以删除，且写入宿主设置时带上 revision',
+  clientSource.includes("const IMAGE_CHANNELS_MUTATE_API = '/api/dsh-imagegen/settings/mutate';") &&
+    clientSource.includes('const removeHostChannel = async (channelId) =>') &&
+    clientSource.includes("ops: [{ op: 'unset', path: ['channels', index] }]") &&
+    clientSource.includes('body.expectedRevision = imageChannelRevision.current;') &&
+    clientSource.includes("result?.code !== 'settings-conflict'") &&
+    clientSource.includes('void removeHostChannel(item.id)') &&
+    clientSource.includes("className: 'dpf-icon-btn dpf-channel-manage'") &&
+    (clientSource.match(/className: 'dpf-icon-btn dpf-channel-del'/g) || []).length === 2 &&
+    clientSource.includes("channelDeleteAsk: '删除这个渠道？") &&
+    clientSource.includes("channelDeleteAsk: 'Remove this channel?"),
+  'image-channel-remove',
+);
+check(
+  '渠道能改名字与端点，宿主渠道走 set + revision',
+  clientSource.includes('const updateHostChannel = async (channelId, draft) =>') &&
+    clientSource.includes("ops.push({ op: 'set', path: ['channels', index, 'name'], value: name });") &&
+    clientSource.includes("ops.push({ op: 'set', path: ['channels', index, 'apiUrl'], value: apiUrl });") &&
+    clientSource.includes('const updateCustomTarget = async (targetId, draft) =>') &&
+    clientSource.includes('target: { id: targetId, label: name, baseUrl: apiUrl, models: current.models || [] }') &&
+    (clientSource.match(/className: 'dpf-icon-btn dpf-channel-edit'/g) || []).length === 2 &&
+    (clientSource.match(/className: 'dpf-btn dpf-btn-small dpf-channel-save'/g) || []).length === 2 &&
+    clientSource.includes("channelEditName: '渠道名称'") &&
+    clientSource.includes("channelEditName: 'Channel name'"),
+  'image-channel-edit',
+);
+check(
+  '宿主设置读不到时用本地副本兜底，不显示成还没配置',
+  clientSource.includes("const IMAGE_CHANNELS_CACHE_KEY = 'dsh-drawcraft:image-channels:v1';") &&
+    clientSource.includes('const readChannelCache = () =>') &&
+    clientSource.includes('const writeChannelCache = (channels) =>') &&
+    clientSource.includes('if (normalized.length > 0) writeChannelCache(normalized);') &&
+    clientSource.includes('const usable = live.length > 0 ? live : readChannelCache().filter((channel) => channel.models.length > 0);') &&
+    clientSource.includes('setChannelStale(live.length === 0);') &&
+    clientSource.includes("className: 'dpf-channel-stale'") &&
+    clientSource.includes("channelStale: '设置暂时没读到，先用上次的渠道列表；重启一次桌面端就能恢复'") &&
+    clientSource.includes('channelStale: \'Settings unavailable'),
+  'image-channel-cache-fallback',
+);
+check(
+  '按命名空间认 imagegen，不盲取第一个可配置插件',
+  clientSource.includes("namespaces.find((row) => row?.ns === 'imagegen' || row?.ns === 'dsh-imagegen')") &&
+    clientSource.includes('?? namespaces.find((row) => Array.isArray(row?.value?.channels))'),
+  'image-channel-namespace-pick',
+);
+check(
+  '渠道列表由服务端代取，浏览器端不必自己认命名空间',
+  source.includes('`${API}/image-channels`') &&
+    (source.match(/`\$\{API\}\/image-channels\/mutate`/g) || []).length === 2 &&
+    serverSource.includes('route(`${API}/image-channels`, async (req, res) =>') &&
+    serverSource.includes('route(`${API}/image-channels/mutate`, async (req, res) =>') &&
+    serverSource.includes("rows.find((row) => row.ns === 'imagegen' || row.ns === 'dsh-imagegen')") &&
+    serverSource.includes('settings.mutate(') &&
+    serverSource.includes('settings describe ->'),
+  'image-channel-server-proxy',
 );
 check(
   '没有真 DOM 时跳过注入',
